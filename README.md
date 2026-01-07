@@ -4,7 +4,7 @@ The Community Hub serves as a collaborative platform for gathering and managing 
 
 Key Features:
 
-- Public Boards: For transparency in triage and task management.
+- [Public Boards](https://github.com/orgs/midnightntwrk/projects/36): For transparency in triage and task management.
 - Automated Workflow (coming soon): Issues are automatically added to boards and moved based on labels.
 - Inclusive Contribution: Open to all, with guidelines for high-quality submissions.
 
@@ -33,7 +33,7 @@ When creating an issue, select the appropriate template from the "New Issue" pag
 
 ## Workflow
 
-Our workflow ensures every submission is reviewed fairly and efficiently. Issues start in the Community Board for triage and, if approved, move to the Grab n Go Board for contributors to pick up. Both boards are public for transparency.
+Our workflow ensures every submission is reviewed fairly and efficiently. Issues start in the [Contributor Board](https://github.com/orgs/midnightntwrk/projects/36) for triage and, if approved, move to the Grab n Go Board for contributors to pick up. Both boards are public for transparency.
 
 Columns (based on the "Status" field):
 
