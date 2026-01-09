@@ -54,13 +54,13 @@ jobs:
               // Remove existing priority labels
               const labelsToKeep = currentLabels.filter(l => !priorityLabels.includes(l));
               
-              // Determine new priority label
+              // Determine new priority label  
               let newPriorityLabel = null;
-              if (priorityScore >= 50) {
+              if (priorityScore >= 30) {
                 newPriorityLabel = 'high-priority';
-              } else if (priorityScore >= 20) {
+              } else if (priorityScore >= 15) {
                 newPriorityLabel = 'medium-priority';
-              } else if (priorityScore >= 0) {
+              } else {
                 newPriorityLabel = 'low-priority';
               }
               
