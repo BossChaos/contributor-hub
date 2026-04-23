@@ -85,9 +85,11 @@ contract TokenEscrow {
     /// @return [] Empty tuple on success
     export circuit release(
         recipient: ZswapCoinPublicKey,
-        amount: Uint<128>
+        amount: Uint<128>,
+        caller: Bytes<32>
     ): [] {
         assert(isActive, "No active escrow");
+        assert(owner == caller, "Unauthorized: not the owner");
         
         // Get the deposited coin from ledger
         assert(depositedCoin.isSome, "No coin deposited");

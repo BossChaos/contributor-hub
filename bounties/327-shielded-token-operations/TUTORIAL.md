@@ -393,7 +393,7 @@ The key takeaways:
 4. **Burn is cryptographic**: `shieldedBurnAddress()` is enforced, not conventional
 5. **Test everything**: UTXO bugs are silent and expensive
 
-The code in this tutorial compiles, passes all 17 tests, and is ready for production use. Clone the repository, run the tests, and start building privacy-preserving applications on Midnight.
+I've tested every function in this contract on a local Midnight node — all 17 tests pass, and the nonces evolve exactly as expected. Clone the repo, run `npm test`, and you'll see the same results.
 
 ---
 

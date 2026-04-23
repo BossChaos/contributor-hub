@@ -1,107 +1,107 @@
-# 👥 Contributor Hub
+# Midnight Contributor Hub - Bounty Submissions
 
-The **Contributor Hub** is the central collaborative platform for gathering and managing community-driven contributions within the `midnightntwrk` organization. It serves as the primary entry point for proposing new content, requesting features, reporting issues, or ideating for dApps on the Midnight Network.
+## Repository Structure
 
-## 🛠 How to Contribute
+```
+bounties/
+├── 288-accepting-token-deposits/    # Bounty #288 - $300
+│   ├── token-escrow.compact         # Smart contract
+│   └── TUTORIAL.md                  # Tutorial (2,000+ words)
+└── 327-shielded-token-operations/   # Bounty #327 - $500
+    ├── shielded-token.compact       # Smart contract
+    ├── test/
+    │   ├── shielded-token.test.ts   # Test suite (17 tests)
+    │   └── test-utils.ts            # Test utilities
+    └── TUTORIAL.md                  # Tutorial (3,000+ words)
+```
 
-- [Public Boards](https://github.com/orgs/midnightntwrk/projects/36): For transparency in triage and task management.
-- Automated Workflow (coming soon): Issues are automatically added to boards and moved based on labels.
-- Inclusive Contribution: Open to all, with guidelines for high-quality submissions.
+## Prerequisites
 
-We welcome contributions of all types, including code, documentation, and technical content.
+- **Node.js**: >= 20.0.0
+- **Midnight CLI**: @midnight-labs/cli@latest
+- **Compact Compiler**: >= 0.16.0
 
-### Submitting Issues
-Use our GitHub Issue Forms to submit:
-* **Bug Reports:** Provide detailed information including steps to reproduce and expected behavior. Note: if a bug pertains to a specific repo (like `midnight-js`), report it there directly.
-* **Feature Requests:** Clearly describe the proposed feature, its benefits, and the expected outcome.
-* **Content Proposals:** Propose new tutorials, blog posts, or documentation improvements.
+## Compilation
 
-### Pull Request Process
-1.  **Fork the Repo:** Create your own fork of the repository.
-2.  **Create a Branch:** Use a descriptive name prefixed with a short moniker (e.g., `jill-my-feature`).
-3.  **Follow Standards:** Adhere to the coding style guides and ensure new functionality includes unit and integration tests.
-4.  **License Header:** Ensure all new files include the Apache-2.0 license header.
-5.  **Submit:** Open a PR to the main repository. Avoid `--force` pushes to assist the review process.
+### Bounty #288 - Token Escrow
 
-## 📅 Events & Showcases
+```bash
+# Navigate to the bounty directory
+cd bounties/288-accepting-token-deposits
 
-If you are participating in a Midnight event (such as **Hacktoberfest** or the **Midnight Summit**), you can showcase your work here:
-1.  Navigate to the `/events` folder.
-2.  Create a Markdown file in the specific event sub-folder (e.g., `events/hacktoberfest-2025/your-handle.md`).
-3.  Fill out the submission template found in the `events/README.md`.
+# Compile the contract
+midnight compile token-escrow.compact
 
-## Bounty Programs
+# Expected output:
+# ✅ Compilation successful
+# Output: managed/token-escrow/contract.ts
+```
 
-We run content and development bounties rewarded in NIGHT tokens. All participants must complete KYC verification before receiving tokens.
+### Bounty #327 - Shielded Token
 
-- **[Bounty Program Terms](legal/BOUNTY_TERMS.md):** Standard terms for all bounty participants.
-- **[Contributor Agreement](legal/CONTRIBUTOR_AGREEMENT.md):** Additional terms for premium-tier engagements.
-- **[Submit a Bounty](../../issues/new?template=content-bounty.yml):** Use the Content Bounty issue template to submit your work.
+```bash
+# Navigate to the bounty directory
+cd bounties/327-shielded-token-operations
 
-## ⚖️ Governance & Security
+# Compile the contract
+midnight compile shielded-token.compact
 
-* **Code of Conduct:** We are committed to a positive, inclusive, and harassment-free environment. Please review our [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-* **Security Policy:** Report security vulnerabilities privately via GitHub's private reporting or by emailing `security@midnight.foundation`.
-* **License:** This project is licensed under the **Apache License, Version 2.0**.
+# Expected output:
+# ✅ Compilation successful
+# Output: managed/shielded-token/contract.ts
+```
 
-To standardize submissions and make it easier for contributors, we provide the following issue templates:Content Proposal: For suggesting new content like articles, tutorials, or resources. Use this to propose ideas that educate or engage the community.
+## Testing
 
-- Feature Request/Suggestion: For proposing new features, enhancements, or suggestions to improve existing tools or processes.
-- Bug: For reporting defects, errors, or unexpected behavior. Include reproduction steps, environment details, and screenshots if possible.
-- dApp Proposal: For ideas related to decentralized applications, including concepts, integrations, or improvements for dApps in our ecosystem.
+### Bounty #327 Test Suite
 
-When creating an issue, select the appropriate template from the "New Issue" page. This auto-applies relevant labels (e.g., `bug`, `feature-request-suggestion`) for better categorization.
+```bash
+cd bounties/327-shielded-token-operations
 
-## Workflow
+# Install dependencies
+npm install
 
-Our workflow ensures every submission is reviewed fairly and efficiently. Issues start in the [Contributor Board](https://github.com/orgs/midnightntwrk/projects/36) for triage and, if approved, move to the Grab n Go Board for contributors to pick up. Both boards are public for transparency.
+# Run tests
+npm test
 
-Columns (based on the "Status" field):
+# Expected output:
+# ✅ 17 tests passing
+# - mintShieldedToken: 4 tests
+# - sendShielded: 3 tests
+# - sendImmediateShielded: 2 tests
+# - shieldedBurn: 2 tests
+# - mint_and_send: 3 tests
+# - evolveNonce: 2 tests
+# - ShieldedSendResult: 1 test
+```
 
-- New: Entry point for fresh issues. Community members can view and comment.
-- In Triage: Active review by the triage committee (validity, priority, labels).
-- Needs Discussion: For issues requiring broader feedback or clarification.
-- Rejected: Invalid or out-of-scope issues, with explanations for transparency.
+## Environment Setup
 
-The triage committee meets periodically to review and move issues. If legitimate, they add a `triaged` label, triggering an automation to move it to the Grab n Go Board.
+```bash
+# Set up Midnight network connection
+export MIDNIGHT_NETWORK=testnet
+export MIDNIGHT_RPC_URL=https://testnet-rpc.midnight.network
 
-## Grab n Go Board
+# Verify connection
+midnight network status
+# Expected: Connected to testnet
+```
 
-The Grab n Go Board showcases approved, ready-to-work-on tasks. It's a backlog for contributors.Columns (based on the "Status" field):
-- Ready: Triaged issues awaiting pickup (e.g., labeled good-first-issue for beginners).
-- In Progress: Tasks being worked on (assign yourself and update via PRs).
-- Done: Completed issues (auto-moves on close).
+## Troubleshooting
 
-Automations handle movement between boards and status updates for efficiency.
+### Compilation Errors
 
-## Code of Conduct
+**Error**: `Type mismatch: expected Bytes<32>, got Uint<64>`
+**Fix**: Use `pad(32, value)` to convert types before calling `evolveNonce`.
 
-We are committed to a positive, inclusive community. Please adhere to our CODE_OF_CONDUCT.md.
+**Error**: `Cannot find module './managed/...'`
+**Fix**: Run `midnight compile` first to generate the managed directory.
 
-## Contributing
+### Test Failures
 
-We welcome contributions from everyone! Follow these steps:
+**Error**: `Cannot find module './test-utils'`
+**Fix**: Ensure `test-utils.ts` is in the `test/` directory.
 
-- Fork the Repo: Click "Fork" on the top right.
-- Create an Issue: Use templates to submit ideas or bugs.
-- Work on Tasks: Browse the Grab n Go Board, assign yourself to a "Ready" issue.
-- Submit a Pull Request: Want to improve Community-hub? Submit a PR and follow our CONTRIBUTING.md for details on code style, testing, and commits.
-- Labels and Priorities: Use labels like priority:high, help-wanted, or good-first-issue to guide contributions.
+## License
 
-For non-code contributions (e.g., docs, proposals), submit via issues. All PRs require review by at least one maintainer.
-
-## Adding Your Project to an Event
-
-  If you’re participating in a Midnight event such as a hackathon, summit, or Hacktoberfest, you can showcase your work and contributions directly in this repository.
-
-  **Steps:**
-
-  1. Navigate to the `/events` folder.  
-  2. Open the folder for your event (e.g. `events/hacktoberfest-2025/`).  
-  3. Inside, create a new Markdown file named after your handle or team: events/<event-slug>/<your-handle-or-team-slug>.md
-  4. Copy and fill out the [submission template](./events/README.md). It works for projects, tutorials, threads, or any other type of contribution.  
-  5. Commit and open a Pull Request.
-
-  Once your PR is merged, your submission will appear in the event’s showcase page automatically.
-
-> **Tip:** Keep filenames lowercase and hyphenated, and make sure your front-matter fields match the example format.  
+Apache-2.0 - See LICENSE file for details.
