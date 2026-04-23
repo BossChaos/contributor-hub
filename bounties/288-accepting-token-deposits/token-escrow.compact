@@ -1,0 +1,165 @@
+// SPDX-License-Identifier: Apache-2.0
+// Accepting Token Deposits: ReceiveShielded & Escrow Patterns
+// Bounty #288 - Midnight Contributor Hub
+
+pragma language_version >= 0.16.0;
+
+import CompactStandardLibrary;
+
+/// @title TokenEscrow - Demonstrates receiving, storing, and releasing shielded tokens
+/// @notice This contract shows the complete lifecycle of accepting shielded deposits
+///         and releasing them to recipients, covering all key APIs for Bounty #288.
+contract TokenEscrow {
+
+    // ============================================================
+    // LEDGER STATE
+    // ============================================================
+    
+    /// @notice Stores the deposited coin that the contract holds in escrow
+    /// @dev This is a QualifiedShieldedCoinInfo - it represents an existing coin
+    ///      in the ledger that the contract can spend
+    export sealed ledger depositedCoin: Maybe<QualifiedShieldedCoinInfo>;
+    
+    /// @notice Tracks the owner who can withdraw the deposited funds
+    export sealed ledger owner: Bytes<32>;
+    
+    /// @notice Total amount currently held in escrow
+    export sealed ledger escrowAmount: Uint<128>;
+    
+    /// @notice Simple flag to track if escrow is active
+    export sealed ledger isActive: Boolean;
+
+    // ============================================================
+    // CONSTRUCTOR
+    // ============================================================
+    
+    constructor() {
+        depositedCoin = none;
+        owner = pad(32, "\x00");
+        escrowAmount = 0;
+        isActive = false;
+    }
+
+    // ============================================================
+    // CORE FUNCTIONS - Bounty #288 Requirements
+    // ============================================================
+
+    /// @notice Accept a shielded token deposit into the contract
+    /// @dev Uses receiveShielded to accept the coin, then writeCoin to store it
+    ///      in the contract's ledger as a QualifiedShieldedCoinInfo
+    /// 
+    /// @param depositor The ZswapCoinPublicKey of the person depositing
+    /// @param coinInfo The ShieldedCoinInfo describing the incoming coin
+    /// @return [] Empty tuple on success
+    export circuit deposit(
+        depositor: ZswapCoinPublicKey,
+        coinInfo: ShieldedCoinInfo
+    ): [] {
+        assert(!isActive, "Escrow already active");
+        
+        // Step 1: Receive the shielded coin into the contract
+        // receiveShielded accepts a ShieldedCoinInfo and makes it available
+        // for spending within this transaction
+        receiveShielded(coinInfo);
+        
+        // Step 2: Store the coin in the contract's ledger
+        // writeCoin converts a ShieldedCoinInfo into a QualifiedShieldedCoinInfo
+        // and stores it in the ledger. The contract now "owns" this coin.
+        const contractAddr = right(kernel.self());
+        depositedCoin = some(writeCoin(coinInfo, contractAddr));
+        
+        // Step 3: Record metadata
+        owner = disclose(depositor).bytes;
+        escrowAmount = coinInfo.value;
+        isActive = true;
+        
+        return [];
+    }
+
+    /// @notice Release the deposited funds to a recipient
+    /// @dev Uses sendShielded to transfer the escrowed coin to a recipient.
+    ///      Demonstrates handling change output with writeCoin.
+    /// 
+    /// @param recipient The ZswapCoinPublicKey of the recipient
+    /// @param amount The amount to send (must be <= escrowAmount)
+    /// @return [] Empty tuple on success
+    export circuit release(
+        recipient: ZswapCoinPublicKey,
+        amount: Uint<128>
+    ): [] {
+        assert(isActive, "No active escrow");
+        
+        // Get the deposited coin from ledger
+        assert(depositedCoin.isSome, "No coin deposited");
+        const coin = depositedCoin.value;
+        
+        // Verify sufficient balance
+        assert(coin.value >= amount, "Insufficient escrow balance");
+        
+        // Step 1: Send the shielded coin to recipient
+        // sendShielded takes a QualifiedShieldedCoinInfo (from ledger),
+        // a recipient, and an amount. Returns ShieldedSendResult.
+        const sendResult = sendShielded(coin, left(recipient), amount);
+        
+        // Step 2: Handle change - if there's leftover, store it back
+        // This is crucial: the contract must track any change coins
+        if (sendResult.change.isSome) {
+            const contractAddr = right(kernel.self());
+            // writeCoin the change back to ledger
+            depositedCoin = some(writeCoin(sendResult.change.value, contractAddr));
+            escrowAmount = sendResult.change.value;
+        } else {
+            // No change - escrow is now empty
+            depositedCoin = none;
+            escrowAmount = 0;
+            isActive = false;
+        }
+        
+        return [];
+    }
+
+    /// @notice Merge multiple coins in the contract (demonstrates mergeCoinImmediate)
+    /// @dev When a contract receives multiple deposits, it may have multiple coins.
+    ///      mergeCoinImmediate combines two coins into one, reducing UTXO fragmentation.
+    /// 
+    /// @param coinA First QualifiedShieldedCoinInfo to merge
+    /// @param coinB Second QualifiedShieldedCoinInfo to merge
+    /// @return QualifiedShieldedCoinInfo The merged coin
+    export circuit mergeDeposits(
+        coinA: QualifiedShieldedCoinInfo,
+        coinB: QualifiedShieldedCoinInfo
+    ): QualifiedShieldedCoinInfo {
+        // mergeCoinImmediate combines two coins instantly
+        // Unlike mergeCoin (which requires a separate transaction),
+        // mergeCoinImmediate returns the merged result immediately
+        const mergedCoin = mergeCoinImmediate(coinA, coinB);
+        
+        // Update ledger with merged coin
+        depositedCoin = some(mergedCoin);
+        escrowAmount = coinA.value + coinB.value;
+        
+        return mergedCoin;
+    }
+
+    // ============================================================
+    // QUERY FUNCTIONS
+    // ============================================================
+
+    /// @notice Check if escrow is currently active
+    /// @return Boolean true if active
+    export circuit isEscrowActive(): Boolean {
+        return isActive;
+    }
+
+    /// @notice Get the current escrow amount
+    /// @return Uint<128> The amount held in escrow
+    export circuit getEscrowAmount(): Uint<128> {
+        return escrowAmount;
+    }
+
+    /// @notice Get the owner address
+    /// @return Bytes<32> The owner's public key bytes
+    export circuit getOwner(): Bytes<32> {
+        return owner;
+    }
+}
