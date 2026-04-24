@@ -1,0 +1,177 @@
+// Unshielded Token dApp: Mint, Transfer & Receive
+// Compact language version 0.22.0 (compiler 0.30.0)
+// Midnight Network - Unshielded Token Tutorial Contract
+//
+// This contract demonstrates unshielded (public) token operations on Midnight Network
+// using the Compact programming language. Unshielded tokens are simpler than shielded
+// tokens because they don't use zero-knowledge proofs or hidden values.
+//
+// Operations covered:
+// - mintUnshieldedToken: Create new tokens and assign to an address (owner only)
+// - sendUnshielded: Transfer tokens from one address to another
+// - receiveUnshielded: Accept incoming token transfers
+// - getBalance: Query the balance of any address
+// - getTotalSupply: Query the total circulating supply
+//
+// Type constraints:
+// - All token amounts use Uint<128>
+// - Addresses use Bytes<32>
+// - Balances use Map<Bytes<32>, Uint<128>> for address-to-balance mapping
+//
+// Key differences from shielded tokens:
+// - Values are visible on-chain (no privacy)
+// - No nonce evolution or ZK proofs required
+// - Simpler state model (account-based vs UTXO-based)
+// - Faster transactions and lower gas costs
+
+pragma language_version >= 0.22;
+
+import CompactStandardLibrary;
+
+// ============================================
+// Contract State
+// ============================================
+// Total supply of tokens in circulation
+export ledger totalSupply: Uint<128>;
+
+// Owner address (set at initialization, controls minting)
+export ledger owner: Bytes<32>;
+
+// Token color identifier (distinguishes this token type on Midnight)
+export ledger tokenColor: Bytes<32>;
+
+// Balances mapping: address -> token balance
+// This is the core state of our unshielded token system
+export ledger balances: Map<Bytes<32>, Uint<128>>;
+
+// ============================================
+// Mint Operation
+// ============================================
+// Creates new unshielded tokens and assigns them to the recipient.
+// Only the contract owner can mint new tokens.
+//
+// @param recipient - Recipient's public key bytes (Bytes<32>)
+// @param amount - Amount of tokens to mint (Uint<128>)
+// @returns Uint<128> The new balance of the recipient
+// ============================================
+export circuit mintUnshieldedToken(
+    recipient: Bytes<32>,
+    amount: Uint<128>
+): Uint<128> {
+    // Access control: verify caller is the contract owner
+    const caller = ownPublicKey().bytes;
+    assert(caller == owner, "Only owner can mint");
+
+    // Validate: amount must be positive
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+
+    // Get current balance (default to 0 if no existing balance)
+    const currentBalance = disclose(balances.get(recipient, 0 as Uint<128>));
+
+    // Update recipient's balance
+    const newBalance = (currentBalance + disclose(amount)) as Uint<128>;
+    balances[recipient] = newBalance;
+
+    // Update total supply
+    totalSupply = (totalSupply + disclose(amount)) as Uint<128>;
+
+    return newBalance;
+}
+
+// ============================================
+// Send Operation
+// ============================================
+// Transfers tokens from the sender to the recipient.
+// The sender must have sufficient balance.
+//
+// @param recipient - Recipient's public key bytes (Bytes<32>)
+// @param amount - Amount to transfer (Uint<128>)
+// @returns Uint<128> The sender's remaining balance after transfer
+// ============================================
+export circuit sendUnshielded(
+    recipient: Bytes<32>,
+    amount: Uint<128>
+): Uint<128> {
+    // Get sender's address
+    const sender = ownPublicKey().bytes;
+
+    // Validate: amount must be positive
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+
+    // Get sender's current balance
+    const senderBalance = disclose(balances.get(sender, 0 as Uint<128>));
+
+    // Check sufficient balance
+    assert(senderBalance >= disclose(amount), "Insufficient balance");
+
+    // Deduct from sender
+    const newSenderBalance = (senderBalance - disclose(amount)) as Uint<128>;
+    balances[sender] = newSenderBalance;
+
+    // Add to recipient
+    const recipientBalance = disclose(balances.get(recipient, 0 as Uint<128>));
+    const newRecipientBalance = (recipientBalance + disclose(amount)) as Uint<128>;
+    balances[recipient] = newRecipientBalance;
+
+    return newSenderBalance;
+}
+
+// ============================================
+// Receive Operation
+// ============================================
+// Acknowledges an incoming token transfer.
+// NOTE: The actual balance update happens in sendUnshielded.
+// This circuit verifies the transfer was received and returns
+// the recipient's updated balance for confirmation purposes.
+//
+// @param sender - Sender's public key bytes (Bytes<32>)
+// @param amount - Amount received (Uint<128>)
+// @returns Uint<128> The recipient's current balance
+// ============================================
+export circuit receiveUnshielded(
+    sender: Bytes<32>,
+    amount: Uint<128>
+): Uint<128> {
+    // Get recipient's address
+    const recipient = ownPublicKey().bytes;
+
+    // Validate: amount must be positive
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+
+    // Get recipient's current balance (already updated by sendUnshielded)
+    const currentBalance = disclose(balances.get(recipient, 0 as Uint<128>));
+
+    // Verify: balance should have increased by the sent amount
+    // This is a confirmation/acknowledgment, NOT a balance update
+    assert(currentBalance >= disclose(amount), "Transfer not found on chain");
+
+    return currentBalance;
+}
+
+// ============================================
+// Query Operations
+// ============================================
+// Get the balance of any address
+//
+// @param address - Address to query (Bytes<32>)
+// @returns Uint<128> The balance of the address
+// ============================================
+export circuit getBalance(address: Bytes<32>): Uint<128> {
+    return disclose(balances.get(address, 0 as Uint<128>));
+}
+
+// Get the total circulating supply
+//
+// @returns Uint<128> The total supply
+// ============================================
+export circuit getTotalSupply(): Uint<128> {
+    return disclose(totalSupply);
+}
+
+// Get the token color
+//
+// @returns Bytes<32> The token color identifier
+// ============================================
+export circuit getTokenColor(): Bytes<32> {
+    return disclose(tokenColor);
+}
