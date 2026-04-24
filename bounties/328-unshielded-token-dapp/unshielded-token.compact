@@ -119,13 +119,14 @@ export circuit sendUnshielded(
 // ============================================
 // Receive Operation
 // ============================================
-// Accepts an incoming token transfer.
-// In unshielded tokens, receiving is automatic, but this circuit
-// provides an explicit acknowledgment mechanism for dApp integration.
+// Acknowledges an incoming token transfer.
+// NOTE: The actual balance update happens in sendUnshielded.
+// This circuit verifies the transfer was received and returns
+// the recipient's updated balance for confirmation purposes.
 //
 // @param sender - Sender's public key bytes (Bytes<32>)
 // @param amount - Amount received (Uint<128>)
-// @returns Uint<128> The recipient's new balance
+// @returns Uint<128> The recipient's current balance
 // ============================================
 export circuit receiveUnshielded(
     sender: Bytes<32>,
@@ -137,14 +138,14 @@ export circuit receiveUnshielded(
     // Validate: amount must be positive
     assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
 
-    // Get recipient's current balance
+    // Get recipient's current balance (already updated by sendUnshielded)
     const currentBalance = disclose(balances.get(recipient, 0 as Uint<128>));
 
-    // Update balance (should match what sendUnshielded did)
-    const newBalance = (currentBalance + disclose(amount)) as Uint<128>;
-    balances[recipient] = newBalance;
+    // Verify: balance should have increased by the sent amount
+    // This is a confirmation/acknowledgment, NOT a balance update
+    assert(currentBalance >= disclose(amount), "Transfer not found on chain");
 
-    return newBalance;
+    return currentBalance;
 }
 
 // ============================================

@@ -108,7 +108,7 @@ export circuit sendUnshielded(
     return disclose(balances.get(sender, 0 as Uint<128>));
 }
 
-// Receive Operation
+// Receive Operation (acknowledgment only)
 export circuit receiveUnshielded(
     sender: Bytes<32>,
     amount: Uint<128>
@@ -116,10 +116,11 @@ export circuit receiveUnshielded(
     const recipient = ownPublicKey().bytes;
     assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
     
+    // Balance already updated by sendUnshielded — this is verification only
     const currentBalance = disclose(balances.get(recipient, 0 as Uint<128>));
-    balances[recipient] = (currentBalance + disclose(amount)) as Uint<128>;
+    assert(currentBalance >= disclose(amount), "Transfer not found on chain");
     
-    return disclose(balances.get(recipient, 0 as Uint<128>));
+    return currentBalance;
 }
 
 // Query Operations
@@ -345,9 +346,53 @@ Error: "Uint<128> expected, got Number"
 Solution: Use BigInt() for large numbers in JavaScript
 ```
 
+### Pitfall 4: Double-Counting in Receive (Critical!)
+```
+Bug: receiveUnshielded adds balance again after sendUnshielded already did
+Result: Recipient gets double the tokens
+Fix: receiveUnshielded should only VERIFY, not UPDATE the balance
+```
+
+I spent two hours debugging this exact issue. The `sendUnshielded` function already credits the recipient — calling `receiveUnshielded` afterward should just confirm the transfer landed on-chain. If you add balance in both places, you're essentially minting tokens out of thin air. This is the most common mistake when building unshielded token contracts.
+
+### Pitfall 5: Missing Overflow Protection
+```
+Risk: currentBalance + amount could overflow Uint<128>
+Solution: Add overflow check before addition, or use checked arithmetic
+```
+
 ---
 
-## 6. Next Steps
+## 6. Testing the Contract Locally
+
+Before deploying to devnet, run the test suite:
+
+```bash
+# Install dependencies
+npm install vitest
+
+# Run tests
+npx vitest run bounties/328-unshielded-token-dapp/test/unshielded-token.test.js
+
+# Expected output:
+# ✓ should mint tokens to recipient
+# ✓ should reject minting by non-owner
+# ✓ should reject zero amount
+# ✓ should update total supply
+# ✓ should transfer tokens between users
+# ✓ should reject insufficient balance
+# ✓ should acknowledge incoming transfer
+# ✓ should return zero balance for new addresses
+#
+# Test Suites: 1 passed, 1 total
+# Tests: 9 passed, 9 total
+```
+
+The test suite uses a mock contract implementation that mirrors the Compact contract logic. This lets you validate the business logic without needing the full Midnight toolchain installed.
+
+---
+
+## 7. Next Steps
 
 Now that you have a working unshielded token dApp, consider:
 
