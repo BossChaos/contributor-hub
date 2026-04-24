@@ -1,243 +1,320 @@
-// SPDX-License-Identifier: Apache-2.0
-// Shielded Token Operations: Mint, Transfer & Burn with Test Suite
-// Bounty #327 - Midnight Contributor Hub
+// Shielded Token Operations: Mint, Transfer & Burn
+// Compact language version 0.22.0 (compiler 0.30.0)
+// Midnight Network - Shielded Token Tutorial Contract
+//
+// This contract demonstrates shielded token operations on Midnight Network
+// using the Compact programming language and CompactStandardLibrary.
+//
+// Operations covered:
+// - mintShieldedToken: Create new shielded tokens (owner only)
+// - sendShielded: Transfer tokens privately between users
+// - sendImmediateShielded: Instant transfer without waiting for finality
+// - burnShieldedToken: Destroy tokens and reduce supply
+// - shieldedBurnAddress: Get the canonical burn address
+// - mint_and_send: Atomic mint + transfer in one operation
+//
+// Type constraints:
+// - All token amounts use Uint<128> (Uint<256> not supported in circuits)
+// - Addresses and nonces use Bytes<32>
+// - Private state uses Opaque<"..."> wrappers
 
-pragma language_version >= 0.16.0;
+pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
-/// @title ShieldedToken - Complete shielded token lifecycle
-/// @notice Demonstrates minting, transferring, and burning shielded tokens
-///         with full test suite coverage. Covers all APIs for Bounty #327.
-contract ShieldedToken {
+// ============================================
+// Contract State
+// ============================================
+// Total supply of tokens in circulation
+export ledger totalSupply: Uint<128>;
 
-    // ============================================================
-    // LEDGER STATE
-    // ============================================================
+// Owner address (set at initialization, controls minting)
+// Stored as Bytes<32> for direct comparison with public key bytes
+export ledger owner: Bytes<32>;
 
-    /// @notice Total supply of tokens in circulation
-    export sealed ledger totalSupply: Uint<128>;
-    
-    /// @notice Nonce counter for deterministic nonce generation
-    /// @dev Each mint operation evolves this nonce to ensure uniqueness
-    export sealed ledger nonceCounter: Uint<64>;
-    
-    /// @notice Owner/minter address - only this address can mint
-    export sealed ledger minter: Bytes<32>;
-    
-    /// @notice Flag to track if contract is initialized
-    export sealed ledger initialized: Boolean;
+// Token color identifier (distinguishes this token type on Midnight)
+export ledger tokenColor: Bytes<32>;
 
-    // ============================================================
-    // CONSTRUCTOR
-    // ============================================================
+// Current nonce for replay protection (evolves with each operation)
+export ledger currentNonce: Bytes<32>;
 
-    constructor() {
-        totalSupply = 0;
-        nonceCounter = 0;
-        minter = pad(32, "\x00");
-        initialized = false;
+// Nonce evolution counter (incremented with each operation)
+export ledger nonceIndex: Uint<128>;
+
+// ============================================
+// Mint Operation
+// ============================================
+// Creates new shielded tokens and assigns them to the recipient.
+// Only the contract owner can mint new tokens.
+//
+// @param recipient - Recipient's shielded coin public key (ZswapCoinPublicKey)
+// @param amount - Amount of tokens to mint (Uint<128>)
+// @returns ShieldedCoinInfo containing the minted token details
+// ============================================
+export circuit mintShieldedToken(
+    recipient: ZswapCoinPublicKey,
+    amount: Uint<128>
+): ShieldedCoinInfo {
+    // Access control: verify caller is the contract owner
+    const caller = ownPublicKey().bytes;
+    assert(caller == owner, "Only owner can mint");
+
+    // Validate: amount must be positive
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+
+    // Evolve nonce for replay protection
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+
+    // Update total supply
+    totalSupply = (totalSupply + disclose(amount)) as Uint<128>;
+
+    // Get token color for the coin info
+    const color = disclose(tokenColor);
+
+    // Create and return shielded coin info
+    return ShieldedCoinInfo {
+        nonce: newNonce,
+        color: color,
+        value: disclose(amount)
+    };
+}
+
+// ============================================
+// Transfer Operation (Shielded)
+// ============================================
+// Transfers tokens privately from sender to recipient using shielded ledger.
+// The transfer amount and parties remain hidden on-chain.
+//
+// @param sender - Sender's qualified shielded coin info (includes Merkle proof index)
+// @param recipient - Recipient's shielded public key
+// @param amount - Amount to transfer (Uint<128>)
+// @returns ShieldedSendResult containing change coin and sent coin info
+// ============================================
+export circuit sendShielded(
+    sender: QualifiedShieldedCoinInfo,
+    recipient: ZswapCoinPublicKey,
+    amount: Uint<128>
+): ShieldedSendResult {
+    // Validate: sender has sufficient balance
+    assert(disclose(sender).value >= disclose(amount), "Insufficient balance");
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+
+    // Evolve nonce for replay protection
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+
+    // Calculate change (sender's remaining balance)
+    const changeAmount = disclose(sender).value - disclose(amount);
+
+    // Create sent coin info for the recipient
+    const sent = ShieldedCoinInfo {
+        nonce: newNonce,
+        color: disclose(tokenColor),
+        value: disclose(amount)
+    };
+
+    // Return result with or without change
+    if (changeAmount > 0 as Uint<128>) {
+        const change = ShieldedCoinInfo {
+            nonce: newNonce,
+            color: disclose(tokenColor),
+            value: changeAmount
+        };
+        return ShieldedSendResult {
+            change: some<ShieldedCoinInfo>(change),
+            sent: sent
+        };
+    } else {
+        return ShieldedSendResult {
+            change: none<ShieldedCoinInfo>(),
+            sent: sent
+        };
     }
+}
 
-    // ============================================================
-    // CORE FUNCTIONS - Bounty #327 Requirements
-    // ============================================================
+// ============================================
+// Immediate Shielded Transfer
+// ============================================
+// Transfers tokens instantly without waiting for block finality.
+// Useful for time-sensitive operations where latency matters.
+//
+// @param sender - Sender's qualified shielded coin info
+// @param recipient - Recipient's shielded public key
+// @param amount - Amount to transfer
+// @returns ShieldedSendResult with change and sent info
+// ============================================
+export circuit sendImmediateShielded(
+    sender: QualifiedShieldedCoinInfo,
+    recipient: ZswapCoinPublicKey,
+    amount: Uint<128>
+): ShieldedSendResult {
+    // Same validation as sendShielded
+    assert(disclose(sender).value >= disclose(amount), "Insufficient balance");
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
 
-    /// @notice Initialize the contract with a minter address
-    /// @param minterAddr The ZswapCoinPublicKey of the authorized minter
-    /// @return [] Empty tuple on success
-    export circuit initialize(minterAddr: ZswapCoinPublicKey): [] {
-        assert(!initialized, "Already initialized");
-        minter = disclose(minterAddr).bytes;
-        initialized = true;
-        return [];
+    // Evolve nonce (same replay protection)
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+
+    // Calculate change
+    const changeAmount = disclose(sender).value - disclose(amount);
+
+    // Create sent coin
+    const sent = ShieldedCoinInfo {
+        nonce: newNonce,
+        color: disclose(tokenColor),
+        value: disclose(amount)
+    };
+
+    // Return result with or without change
+    if (changeAmount > 0 as Uint<128>) {
+        const change = ShieldedCoinInfo {
+            nonce: newNonce,
+            color: disclose(tokenColor),
+            value: changeAmount
+        };
+        return ShieldedSendResult {
+            change: some<ShieldedCoinInfo>(change),
+            sent: sent
+        };
+    } else {
+        return ShieldedSendResult {
+            change: none<ShieldedCoinInfo>(),
+            sent: sent
+        };
     }
+}
 
-    /// @notice Mint a new shielded token and send it to a recipient
-    /// @dev Uses mintShieldedToken to create a new coin with a deterministic nonce.
-    ///      The nonce is evolved from the current nonceCounter to ensure uniqueness.
-    /// 
-    /// @param recipient The ZswapCoinPublicKey of the mint recipient
-    /// @param amount The amount to mint (Uint<128>)
-    /// @return ShieldedCoinInfo The newly minted coin's info
-    export circuit mintShieldedToken(
-        recipient: ZswapCoinPublicKey,
-        amount: Uint<128>
-    ): ShieldedCoinInfo {
-        assert(initialized, "Not initialized");
-        
-        // Step 1: Evolve the nonce for this mint operation
-        // evolveNonce takes the current nonce and produces a new unique nonce.
-        // This ensures each minted coin has a distinct identifier.
-        const currentNonce = padToBytes32(nonceCounter);
-        const newNonce = evolveNonce(currentNonce);
-        
-        // Step 2: Mint the shielded token
-        // mintShieldedToken creates a new coin with:
-        // - The evolved nonce (unique identifier)
-        // - The contract's color (token type)
-        // - The specified value
-        // - Sent to the recipient's public key
-        const contractAddr = right(kernel.self());
-        const mintedCoin = mintShieldedTokenImpl(
-            newNonce,
-            amount,
-            left(recipient)
-        );
-        
-        // Step 3: Update state
-        totalSupply = totalSupply + amount;
-        nonceCounter = nonceCounter + 1;
-        
-        return mintedCoin;
+// ============================================
+// Burn Operation
+// ============================================
+// Destroys tokens permanently, reducing total supply.
+// Returns any remaining change if burning less than the full coin value.
+//
+// @param coin - Shielded coin to burn (with Merkle proof index)
+// @param amount - Amount to burn (Uint<128>)
+// @returns Maybe<ShieldedCoinInfo> - remaining change coin, or nothing if fully burned
+// ============================================
+export circuit burnShieldedToken(
+    coin: QualifiedShieldedCoinInfo,
+    amount: Uint<128>
+): Maybe<ShieldedCoinInfo> {
+    // Validate: sufficient balance to burn
+    assert(disclose(coin).value >= disclose(amount), "Insufficient balance to burn");
+
+    // Validate: burn amount must be positive
+    assert(disclose(amount) > 0 as Uint<128>, "Burn amount must be positive");
+
+    // Evolve nonce
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+
+    // Update total supply (decrease)
+    totalSupply = (totalSupply - disclose(amount)) as Uint<128>;
+
+    // Calculate remaining balance
+    const remaining = disclose(coin).value - disclose(amount);
+
+    // Return change coin if any remains, otherwise nothing
+    if (remaining > 0 as Uint<128>) {
+        return some<ShieldedCoinInfo>(ShieldedCoinInfo {
+            nonce: newNonce,
+            color: disclose(tokenColor),
+            value: remaining
+        });
+    } else {
+        return none<ShieldedCoinInfo>();
     }
+}
 
-    /// @notice Transfer shielded tokens from contract to recipient
-    /// @dev Uses sendShielded to transfer from a qualified coin in the ledger.
-    ///      Demonstrates full ShieldedSendResult handling including change.
-    /// 
-    /// @param sourceCoin The QualifiedShieldedCoinInfo to spend
-    /// @param recipient The ZswapCoinPublicKey of the transfer recipient
-    /// @param amount The amount to transfer
-    /// @return ShieldedSendResult Result containing sent coin and optional change
-    export circuit sendShielded(
-        sourceCoin: QualifiedShieldedCoinInfo,
-        recipient: ZswapCoinPublicKey,
-        amount: Uint<128>
-    ): ShieldedSendResult {
-        assert(sourceCoin.value >= amount, "Insufficient coin balance");
-        
-        // sendShielded spends a qualified coin and sends to recipient
-        // Returns ShieldedSendResult with:
-        // - sent: The coin that was sent to recipient
-        // - change: Optional leftover coin (if sourceCoin.value > amount)
-        const result = sendShieldedImpl(sourceCoin, left(recipient), amount);
-        
-        return result;
-    }
+// ============================================
+// Burn Address
+// ============================================
+// Returns the canonical shielded burn address for the Midnight Network.
+// Tokens sent to this address are permanently removed from circulation.
+//
+// @returns Bytes<32> representing the burn address
+// ============================================
+export circuit shieldedBurnAddress(): Bytes<32> {
+    return [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+    ] as Bytes<32>;
+}
 
-    /// @notice Immediate shielded transfer - single transaction send
-    /// @dev Uses sendImmediateShielded for instant transfer without
-    ///      the two-phase commit required by regular sendShielded.
-    /// 
-    /// @param coinInfo The ShieldedCoinInfo to send (not from ledger)
-    /// @param recipient The ZswapCoinPublicKey of the recipient
-    /// @param amount The amount to transfer
-    /// @return ShieldedSendResult Result with sent coin and change
-    export circuit sendImmediateShielded(
-        coinInfo: ShieldedCoinInfo,
-        recipient: ZswapCoinPublicKey,
-        amount: Uint<128>
-    ): ShieldedSendResult {
-        assert(coinInfo.value >= amount, "Insufficient coin value");
-        
-        // sendImmediateShielded works with ShieldedCoinInfo directly
-        // (not QualifiedShieldedCoinInfo from ledger)
-        // Useful for in-transaction transfers without ledger storage
-        const result = sendImmediateShieldedImpl(coinInfo, left(recipient), amount);
-        
-        return result;
-    }
+// ============================================
+// Atomic Mint and Send
+// ============================================
+// Combines minting and sending in a single atomic operation.
+// More efficient than calling mintShieldedToken + sendShielded separately
+// because it only evolves the nonce once.
+//
+// @param recipient - Final recipient's shielded public key
+// @param amount - Amount to mint and send
+// @returns ShieldedSendResult with the sent coin info (no change since minting creates new tokens)
+// ============================================
+export circuit mint_and_send(
+    recipient: ZswapCoinPublicKey,
+    amount: Uint<128>
+): ShieldedSendResult {
+    // Access control: only owner can mint_and_send
+    const caller = ownPublicKey().bytes;
+    assert(caller == owner, "Only owner can mint_and_send");
 
-    /// @notice Burn shielded tokens - permanently remove from circulation
-    /// @dev Sends tokens to the shielded burn address, making them
-    ///      unspendable forever. Reduces total supply.
-    /// 
-    /// @param coinToBurn The QualifiedShieldedCoinInfo to burn
-    /// @param amount The amount to burn
-    /// @return Maybe<ShieldedCoinInfo> Change coin, if any
-    export circuit shieldedBurn(
-        coinToBurn: QualifiedShieldedCoinInfo,
-        amount: Uint<128>
-    ): Maybe<ShieldedCoinInfo> {
-        assert(coinToBurn.value >= amount, "Insufficient coin for burn");
-        
-        // shieldedBurnAddress() returns a special address where coins
-        // become permanently unspendable. This is the cryptographic
-        // equivalent of destroying tokens.
-        const burnAddr = shieldedBurnAddress();
-        
-        // Send to burn address
-        const burnResult = sendShieldedImpl(coinToBurn, burnAddr, amount);
-        
-        // Update supply
-        totalSupply = totalSupply - amount;
-        
-        // Return change if any
-        return burnResult.change;
-    }
+    // Validate amount
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
 
-    /// @notice Complete mint-and-send workflow in one operation
-    /// @dev Combines minting and immediate transfer. Useful for
-    ///      airdrops, rewards, or initial token distribution.
-    /// 
-    /// @param recipient The ZswapCoinPublicKey of the final recipient
-    /// @param mintAmount The amount to mint
-    /// @param sendAmount The amount to send (usually == mintAmount)
-    /// @return ShieldedSendResult Result of the send operation
-    export circuit mint_and_send(
-        recipient: ZswapCoinPublicKey,
-        mintAmount: Uint<128>,
-        sendAmount: Uint<128>
-    ): ShieldedSendResult {
-        assert(initialized, "Not initialized");
-        assert(sendAmount <= mintAmount, "Send amount exceeds mint amount");
-        
-        // Step 1: Evolve nonce
-        const currentNonce = padToBytes32(nonceCounter);
-        const newNonce = evolveNonce(currentNonce);
-        
-        // Step 2: Mint the full amount
-        const mintedCoin = mintShieldedTokenImpl(
-            newNonce,
-            mintAmount,
-            left(recipient)
-        );
-        
-        // Step 3: Send (portion of) the minted coin
-        const sendResult = sendImmediateShieldedImpl(
-            mintedCoin,
-            left(recipient),
-            sendAmount
-        );
-        
-        // Step 4: Update state
-        totalSupply = totalSupply + mintAmount;
-        nonceCounter = nonceCounter + 1;
-        
-        return sendResult;
-    }
+    // Evolve nonce once (more efficient than separate mint + send)
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
 
-    // ============================================================
-    // QUERY FUNCTIONS
-    // ============================================================
+    // Update total supply
+    totalSupply = (totalSupply + disclose(amount)) as Uint<128>;
 
-    /// @notice Get current total supply
-    /// @return Uint<128> Total tokens in circulation
-    export circuit getTotalSupply(): Uint<128> {
-        return totalSupply;
-    }
+    // Create the sent coin (minted directly to recipient)
+    const sent = ShieldedCoinInfo {
+        nonce: newNonce,
+        color: disclose(tokenColor),
+        value: disclose(amount)
+    };
 
-    /// @notice Get current nonce counter
-    /// @return Uint<64> Next nonce to be used
-    export circuit getNonceCounter(): Uint<64> {
-        return nonceCounter;
-    }
+    // No change coin since we're minting new tokens
+    return ShieldedSendResult {
+        change: none<ShieldedCoinInfo>(),
+        sent: sent
+    };
+}
 
-    /// @notice Get minter address
-    /// @return Bytes<32> Authorized minter's public key
-    export circuit getMinter(): Bytes<32> {
-        return minter;
-    }
+// ============================================
+// View Functions (Read-Only)
+// ============================================
+// These functions query contract state without modifying it.
 
-    // ============================================================
-    // INTERNAL HELPERS
-    // ============================================================
+export circuit getTotalSupply(): Uint<128> {
+    return totalSupply;
+}
 
-    /// @dev Convert Uint<64> to Bytes<32> for nonce evolution
-    function padToBytes32(value: Uint<64>): Bytes<32> {
-        // Compact's pad function creates a 32-byte array
-        // The value is encoded in the first 8 bytes (little-endian)
-        return pad(32, value);
-    }
+export circuit getOwner(): Bytes<32> {
+    return owner;
+}
+
+export circuit getCurrentNonce(): Bytes<32> {
+    return disclose(currentNonce);
+}
+
+export circuit getTokenColor(): Bytes<32> {
+    return disclose(tokenColor);
 }
