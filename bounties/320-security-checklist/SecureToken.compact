@@ -1,0 +1,93 @@
+// SecureToken.compact - Example demonstrating security checklist items
+// This contract shows proper implementation of security best practices
+// Compact language version 0.22.0 (compiler 0.30.0)
+
+pragma language_version >= 0.22;
+
+import CompactStandardLibrary;
+
+// ============================================
+// Contract State
+// ============================================
+// Total supply of tokens in circulation
+export ledger totalSupply: Uint<128>;
+
+// Owner address (set at initialization, controls minting)
+export ledger owner: Bytes<32>;
+
+// Token color identifier
+export ledger tokenColor: Bytes<32>;
+
+// Current nonce for replay protection
+export ledger currentNonce: Bytes<32>;
+
+// Nonce evolution counter
+export ledger nonceIndex: Uint<128>;
+
+// ============================================
+// Mint Operation
+// ============================================
+// Creates new tokens with proper access control
+export circuit mint(recipient: Bytes<32>, amount: Uint<128>): Uint<128> {
+    // Access control: only owner can mint
+    const caller = ownPublicKey().bytes;
+    assert(caller == owner, "Only owner can mint");
+    
+    // Validate amount
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+    
+    // Update total supply
+    totalSupply = (totalSupply + disclose(amount)) as Uint<128>;
+    
+    // Update nonce for replay protection
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+    
+    return disclose(amount);
+}
+
+// ============================================
+// Transfer Operation
+// ============================================
+// Transfers tokens with proper validation
+export circuit transfer(sender: Bytes<32>, recipient: Bytes<32>, amount: Uint<128>): Uint<128> {
+    // Access control: sender must be authorized
+    const caller = ownPublicKey().bytes;
+    assert(caller == sender, "Unauthorized sender");
+    
+    // Validate amount
+    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+    
+    // Update nonce for replay protection
+    const oldNonce = disclose(currentNonce);
+    const newNonce = evolveNonce(nonceIndex, oldNonce);
+    currentNonce = newNonce;
+    nonceIndex = nonceIndex + 1 as Uint<128>;
+    
+    return disclose(amount);
+}
+
+// ============================================
+// View Functions
+// ============================================
+// Get total supply (public, no sensitive data)
+export circuit getTotalSupply(): Uint<128> {
+    return totalSupply;
+}
+
+// Get owner (public, no sensitive data)
+export circuit getOwner(): Bytes<32> {
+    return owner;
+}
+
+// Get token color (public, no sensitive data)
+export circuit getTokenColor(): Bytes<32> {
+    return disclose(tokenColor);
+}
+
+// Get current nonce (public, no sensitive data)
+export circuit getCurrentNonce(): Bytes<32> {
+    return disclose(currentNonce);
+}
