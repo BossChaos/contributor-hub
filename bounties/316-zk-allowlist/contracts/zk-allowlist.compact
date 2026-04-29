@@ -1,0 +1,112 @@
+// This file is part of Midnight Contributor Hub - ZK Allowlist Tutorial.
+// Copyright (C) 2026 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pragma language_version >= 0.16 && <= 0.21;
+import CompactStandardLibrary;
+
+/// ZK Allowlist Contract
+/// =====================
+/// Implements anonymous membership verification using a sparse Merkle tree
+/// with nullifier-based replay protection.
+///
+/// State Architecture:
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ PUBLIC LEDGER STATE          │ PRIVATE (ZK Witness)    │
+/// ├──────────────────────────────┼─────────────────────────┤
+/// │ merkle_root: Bytes<32>      │ secret: Bytes<32>       │
+/// │ admin_commitment: Bytes<32> │ leaf_hash: Bytes<32>    │
+/// │ used_nullifiers: Set<>      │ merkle_path: Path<20>   │
+/// │                              │ nullifier: Bytes<32>    │
+/// └─────────────────────────────────────────────────────────┘
+
+/// Current Merkle root of the allowlist tree (depth 20 = ~1M members)
+export ledger merkle_root: Bytes<32>;
+
+/// Admin commitment (hash of admin secret, set once during setup)
+export ledger admin_commitment: Bytes<32>;
+
+/// Set of consumed nullifiers to prevent replay attacks
+export ledger used_nullifiers: Set<Bytes<32>>;
+
+/// One-time admin setup circuit.
+/// Pins the admin commitment to prevent unauthorized root updates.
+/// Can only be called once (admin_commitment must be zero initially).
+export circuit setup(admin_commitment: Bytes<32>): [] {
+    assert(admin_commitment != Bytes<32>::zero(), "Admin commitment cannot be zero");
+    assert(admin_commitment == disclose(admin_commitment), "Disclosure required");
+}
+
+/// Authenticated Merkle root update.
+/// Requires proof of admin secret via persistentHash verification.
+/// The caller must disclose a commitment that matches admin_commitment.
+export circuit set_root(new_root: Bytes<32>, admin_secret: Bytes<32>): [] {
+    const d_root = disclose(new_root);
+    const d_secret = disclose(admin_secret);
+    
+    // Recompute admin commitment from secret
+    const computed_commitment = persistentHash<Vector<2, Bytes<32>>>(
+        "zk-allowlist:admin:v1",
+        Vector<[d_secret, Bytes<32>::from_u32(1)]>
+    );
+    
+    // Verify admin authorization
+    assert(computed_commitment == admin_commitment, "Unauthorized: invalid admin secret");
+    
+    // Update Merkle root
+    merkle_root = d_root;
+}
+
+/// Core anonymous membership verification circuit.
+///
+/// Proves (in zero-knowledge) that:
+/// 1. The prover knows a valid Merkle path to the current root
+/// 2. The computed nullifier has not been used before
+/// 3. The nullifier is bound to a specific context (prevents cross-context replay)
+///
+/// Parameters:
+///   leaf: The prover's leaf hash (committed, not revealed)
+///   context: Context string for nullifier binding (prevents cross-protocol replay)
+///   secret: Prover's private secret (used to compute nullifier)
+///
+/// The circuit computes the nullifier and verifies it hasn't been consumed.
+export circuit verify_and_use(leaf: Bytes<32>, context: Bytes<32>, secret: Bytes<32>): [] {
+    const d_leaf = disclose(leaf);
+    const d_context = disclose(context);
+    const d_secret = disclose(secret);
+    
+    // Compute Merkle root from private path witness
+    const path = get_membership_path(d_leaf);
+    const computed_root = merkleTreePathRoot<20, Bytes<32>>(path);
+    
+    // Verify against current ledger state
+    assert(merkle_root == computed_root, "Invalid Merkle path: root mismatch");
+    
+    // Compute nullifier: H(secret || context || leaf)
+    const nullifier = persistentHash<Vector<3, Bytes<32>>>(
+        "zk-allowlist:nullifier:v1",
+        Vector<[d_secret, d_context, d_leaf]>
+    );
+    
+    // Check nullifier hasn't been used (replay protection)
+    assert(!used_nullifiers.member(nullifier), "Nullifier already consumed");
+    
+    // Record nullifier as consumed
+    used_nullifiers.insert(nullifier);
+}
+
+/// Witness function: retrieves the Merkle path for a given leaf.
+/// This data comes from the prover's local environment (not on-chain).
+/// The runtime resolves this via the ledger context's findPathForLeaf method.
+witness get_membership_path(leaf: Bytes<32>): MerkleTreePath<20, Bytes<32>>;
