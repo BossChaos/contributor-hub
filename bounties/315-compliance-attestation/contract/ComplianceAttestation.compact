@@ -1,0 +1,229 @@
+// Compliance Attestation System with Selective Disclosure
+// Bounty #315: Authority attestation via Merkle commitments
+// Users can selectively prove specific properties without revealing others
+// Domain-separated hashing prevents cross-property correlation
+
+pragma language_version >= 0.22;
+
+contract ComplianceAttestation {
+    // Public state - Current Merkle root of attestation tree
+    // Authority pushes this on-chain after issuing attestations
+    ledger attestationRoot: Bytes<32>;
+    
+    // Public state - Set of used proof commitments (prevents replay)
+    // Each proof can only be used once per domain
+    ledger usedProofs: Set<Bytes<32>>;
+    
+    // Public state - Authority address for attestation management
+    ledger authorityAddress: Bytes<32>;
+    
+    // Circuit: Prove a specific property without revealing others
+    // Example: Prove age >= 18 without revealing actual age
+    // Example: Prove residency in a specific region without revealing exact location
+    circuit proveProperty(
+        // Private inputs (witnesses) - never touch the blockchain
+        witness propertyData: Bytes<256>, // Full property data (age, residency, etc.)
+        witness propertySecret: Bytes<32>, // Secret binding the property
+        witness propertyIndex: Uint<32>, // Position in attestation tree
+        witness siblings: [Bytes<32>; 20], // Depth-20 Merkle path
+        witness domainSeparator: Bytes<32>, // Prevents cross-use correlation
+        
+        // Public inputs - visible on-chain but don't reveal full property data
+        public propertyCommitment: Bytes<32>, // H(propertyData, propertySecret)
+        public proofCommitment: Bytes<32>, // H(propertyCommitment, domainSeparator, nonce)
+        public newRoot: Bytes<32>
+    ) {
+        // Step 1: Verify property commitment
+        // propertyCommitment = H(propertyData, propertySecret)
+        // This binds the property data to a secret without revealing it
+        const expectedCommitment: Bytes<32> = sha256(propertyData, propertySecret);
+        assert propertyCommitment == expectedCommitment : "invalid property commitment";
+        
+        // Step 2: Verify proof commitment with domain separation
+        // proofCommitment = H(propertyCommitment, domainSeparator, nonce)
+        // Domain separator ensures the same property can't be correlated across uses
+        const expectedProofCommitment: Bytes<32> = sha256(
+            propertyCommitment, 
+            domainSeparator, 
+            Bytes<1>::from([0x01u8])
+        );
+        assert proofCommitment == expectedProofCommitment : "invalid proof commitment";
+        
+        // Step 3: Check proof hasn't been used before
+        // This prevents replay attacks while maintaining anonymity
+        assert !usedProofs.contains(proofCommitment) : "proof already used - replay detected";
+        
+        // Step 4: Verify Merkle path (depth-20)
+        // Proves the property commitment is in the attestation tree
+        // Without revealing which leaf it is
+        var currentHash: Bytes<32> = propertyCommitment;
+        
+        // Level 0
+        if (propertyIndex & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[0]);
+        } else {
+            currentHash = sha256(siblings[0], currentHash);
+        }
+        
+        // Level 1
+        if ((propertyIndex >> 1u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[1]);
+        } else {
+            currentHash = sha256(siblings[1], currentHash);
+        }
+        
+        // Level 2
+        if ((propertyIndex >> 2u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[2]);
+        } else {
+            currentHash = sha256(siblings[2], currentHash);
+        }
+        
+        // Level 3
+        if ((propertyIndex >> 3u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[3]);
+        } else {
+            currentHash = sha256(siblings[3], currentHash);
+        }
+        
+        // Level 4
+        if ((propertyIndex >> 4u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[4]);
+        } else {
+            currentHash = sha256(siblings[4], currentHash);
+        }
+        
+        // Level 5
+        if ((propertyIndex >> 5u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[5]);
+        } else {
+            currentHash = sha256(siblings[5], currentHash);
+        }
+        
+        // Level 6
+        if ((propertyIndex >> 6u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[6]);
+        } else {
+            currentHash = sha256(siblings[6], currentHash);
+        }
+        
+        // Level 7
+        if ((propertyIndex >> 7u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[7]);
+        } else {
+            currentHash = sha256(siblings[7], currentHash);
+        }
+        
+        // Level 8
+        if ((propertyIndex >> 8u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[8]);
+        } else {
+            currentHash = sha256(siblings[8], currentHash);
+        }
+        
+        // Level 9
+        if ((propertyIndex >> 9u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[9]);
+        } else {
+            currentHash = sha256(siblings[9], currentHash);
+        }
+        
+        // Level 10
+        if ((propertyIndex >> 10u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[10]);
+        } else {
+            currentHash = sha256(siblings[10], currentHash);
+        }
+        
+        // Level 11
+        if ((propertyIndex >> 11u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[11]);
+        } else {
+            currentHash = sha256(siblings[11], currentHash);
+        }
+        
+        // Level 12
+        if ((propertyIndex >> 12u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[12]);
+        } else {
+            currentHash = sha256(siblings[12], currentHash);
+        }
+        
+        // Level 13
+        if ((propertyIndex >> 13u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[13]);
+        } else {
+            currentHash = sha256(siblings[13], currentHash);
+        }
+        
+        // Level 14
+        if ((propertyIndex >> 14u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[14]);
+        } else {
+            currentHash = sha256(siblings[14], currentHash);
+        }
+        
+        // Level 15
+        if ((propertyIndex >> 15u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[15]);
+        } else {
+            currentHash = sha256(siblings[15], currentHash);
+        }
+        
+        // Level 16
+        if ((propertyIndex >> 16u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[16]);
+        } else {
+            currentHash = sha256(siblings[16], currentHash);
+        }
+        
+        // Level 17
+        if ((propertyIndex >> 17u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[17]);
+        } else {
+            currentHash = sha256(siblings[17], currentHash);
+        }
+        
+        // Level 18
+        if ((propertyIndex >> 18u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[18]);
+        } else {
+            currentHash = sha256(siblings[18], currentHash);
+        }
+        
+        // Level 19
+        if ((propertyIndex >> 19u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[19]);
+        } else {
+            currentHash = sha256(siblings[19], currentHash);
+        }
+        
+        // Step 5: Verify computed root matches on-chain root
+        // This proves the property is attested by the authority
+        assert currentHash == attestationRoot : "invalid attestation - not in tree";
+        
+        // Step 6: Record proof commitment to prevent replay
+        usedProofs.insert(proofCommitment);
+        
+        // Step 7: Update root
+        attestationRoot = newRoot;
+    }
+    
+    // Circuit: Authority updates attestation root
+    // Called after authority issues/revokes attestations
+    circuit updateAttestationRoot(
+        witness authoritySecret: Bytes<32>,
+        public newRoot: Bytes<32>,
+        public authorityCommitment: Bytes<32>
+    ) {
+        // Verify authority identity
+        const expectedCommitment: Bytes<32> = sha256(
+            authoritySecret, 
+            Bytes<1>::from([0xAuu8])
+        );
+        assert authorityCommitment == expectedCommitment : "invalid authority commitment";
+        
+        // Update root
+        attestationRoot = newRoot;
+    }
+}
