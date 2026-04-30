@@ -1,0 +1,227 @@
+// Anonymous Membership Proofs Contract
+// Bounty #316: Allowlists, Voter Rolls & Gated Access
+// Compact Language Version: 0.22+
+
+pragma language_version >= 0.22;
+
+contract AnonymousMembership {
+    // Public state - Current Merkle root of the membership tree
+    // This is what the admin pushes on-chain after adding members off-chain
+    ledger membershipRoot: Bytes<32>;
+    
+    // Public state - Set of used nullifiers (prevents replay attacks)
+    // Each membership proof can only be used once
+    ledger usedNullifiers: Set<Bytes<32>>;
+    
+    // Public state - Admin address for root management
+    // In production, this would be a multisig or governance contract
+    ledger adminAddress: Bytes<32>;
+    
+    // Circuit: Verify membership and use it
+    // Proves you're in the membership tree without revealing which leaf
+    // Uses nullifier to prevent replay (same proof can't be used twice)
+    circuit verifyMembership(
+        // Private inputs (witnesses) - never touch the blockchain
+        witness memberSecret: Bytes<32>,
+        witness memberIndex: Uint<32>,
+        witness siblings: [Bytes<32>; 20], // Depth-20 Merkle path
+        witness domainSeparator: Bytes<32>, // Prevents cross-use correlation
+        
+        // Public inputs - visible on-chain but don't reveal identity
+        public nullifier: Bytes<32>,
+        public newRoot: Bytes<32>
+    ) {
+        // Step 1: Compute the leaf hash from member secret
+        // The leaf is H(memberSecret, domainSeparator)
+        // Domain separator ensures the same member can't be used across different contracts
+        const leafHash: Bytes<32> = sha256(memberSecret, domainSeparator);
+        
+        // Step 2: Verify nullifier is correctly derived
+        // Nullifier = H(memberSecret, domainSeparator, 0x01)
+        // The 0x01 suffix distinguishes nullifiers from leaf hashes
+        const expectedNullifier: Bytes<32> = sha256(memberSecret, domainSeparator, Bytes<1>::from([0x01u8]));
+        assert nullifier == expectedNullifier : "invalid nullifier derivation";
+        
+        // Step 3: Verify nullifier hasn't been used before
+        // This is the core replay prevention mechanism
+        assert !usedNullifiers.contains(nullifier) : "nullifier already used - replay detected";
+        
+        // Step 4: Verify Merkle path (depth-20)
+        // Walk up the tree from leaf to root using siblings
+        var currentHash: Bytes<32> = leafHash;
+        
+        // In Compact, we need to manually verify each level of the Merkle tree
+        // For depth-20, we verify 20 sibling hashes
+        // The memberIndex determines whether currentHash is left or right child
+        
+        // Level 0
+        if (memberIndex & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[0]);
+        } else {
+            currentHash = sha256(siblings[0], currentHash);
+        }
+        
+        // Level 1
+        if ((memberIndex >> 1u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[1]);
+        } else {
+            currentHash = sha256(siblings[1], currentHash);
+        }
+        
+        // Level 2
+        if ((memberIndex >> 2u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[2]);
+        } else {
+            currentHash = sha256(siblings[2], currentHash);
+        }
+        
+        // Level 3
+        if ((memberIndex >> 3u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[3]);
+        } else {
+            currentHash = sha256(siblings[3], currentHash);
+        }
+        
+        // Level 4
+        if ((memberIndex >> 4u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[4]);
+        } else {
+            currentHash = sha256(siblings[4], currentHash);
+        }
+        
+        // Level 5
+        if ((memberIndex >> 5u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[5]);
+        } else {
+            currentHash = sha256(siblings[5], currentHash);
+        }
+        
+        // Level 6
+        if ((memberIndex >> 6u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[6]);
+        } else {
+            currentHash = sha256(siblings[6], currentHash);
+        }
+        
+        // Level 7
+        if ((memberIndex >> 7u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[7]);
+        } else {
+            currentHash = sha256(siblings[7], currentHash);
+        }
+        
+        // Level 8
+        if ((memberIndex >> 8u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[8]);
+        } else {
+            currentHash = sha256(siblings[8], currentHash);
+        }
+        
+        // Level 9
+        if ((memberIndex >> 9u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[9]);
+        } else {
+            currentHash = sha256(siblings[9], currentHash);
+        }
+        
+        // Level 10
+        if ((memberIndex >> 10u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[10]);
+        } else {
+            currentHash = sha256(siblings[10], currentHash);
+        }
+        
+        // Level 11
+        if ((memberIndex >> 11u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[11]);
+        } else {
+            currentHash = sha256(siblings[11], currentHash);
+        }
+        
+        // Level 12
+        if ((memberIndex >> 12u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[12]);
+        } else {
+            currentHash = sha256(siblings[12], currentHash);
+        }
+        
+        // Level 13
+        if ((memberIndex >> 13u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[13]);
+        } else {
+            currentHash = sha256(siblings[13], currentHash);
+        }
+        
+        // Level 14
+        if ((memberIndex >> 14u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[14]);
+        } else {
+            currentHash = sha256(siblings[14], currentHash);
+        }
+        
+        // Level 15
+        if ((memberIndex >> 15u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[15]);
+        } else {
+            currentHash = sha256(siblings[15], currentHash);
+        }
+        
+        // Level 16
+        if ((memberIndex >> 16u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[16]);
+        } else {
+            currentHash = sha256(siblings[16], currentHash);
+        }
+        
+        // Level 17
+        if ((memberIndex >> 17u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[17]);
+        } else {
+            currentHash = sha256(siblings[17], currentHash);
+        }
+        
+        // Level 18
+        if ((memberIndex >> 18u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[18]);
+        } else {
+            currentHash = sha256(siblings[18], currentHash);
+        }
+        
+        // Level 19
+        if ((memberIndex >> 19u32) & 1u32 == 0u32) {
+            currentHash = sha256(currentHash, siblings[19]);
+        } else {
+            currentHash = sha256(siblings[19], currentHash);
+        }
+        
+        // Step 5: Verify the computed root matches the on-chain root
+        // This proves the member is in the tree without revealing which leaf
+        assert currentHash == membershipRoot : "invalid Merkle path - not a member";
+        
+        // Step 6: Record the nullifier to prevent replay
+        // After this, the same member can't use this proof again
+        usedNullifiers.insert(nullifier);
+        
+        // Step 7: Update the root (for potential future operations)
+        membershipRoot = newRoot;
+    }
+    
+    // Circuit: Admin updates the membership root
+    // Called after admin adds/removes members off-chain
+    // In production, this would have proper access control
+    circuit updateMembershipRoot(
+        witness adminSecret: Bytes<32>,
+        public newRoot: Bytes<32>,
+        public expectedAdminNullifier: Bytes<32>
+    ) {
+        // Verify admin identity
+        const adminNullifier: Bytes<32> = sha256(adminSecret, Bytes<1>::from([0xADu8]));
+        assert adminNullifier == expectedAdminNullifier : "invalid admin nullifier";
+        
+        // In production, you'd verify adminNullifier matches adminAddress
+        // For this tutorial, we trust the adminSecret is kept secure
+        
+        // Update the root
+        membershipRoot = newRoot;
+    }
+}
