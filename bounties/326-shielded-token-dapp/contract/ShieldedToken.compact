@@ -1,0 +1,157 @@
+// Shielded Token Contract - Full Lifecycle
+// Bounty #326: Building a Shielded Token dApp with UI
+// Compact Language Version: 0.22+
+
+pragma language_version >= 0.22;
+
+contract ShieldedToken {
+    // Public state - Merkle root of commitments
+    ledger commitmentRoot: Bytes<32>;
+    
+    // Public state - Nullifier set to prevent double spending
+    ledger nullifierSet: Set<Bytes<32>>;
+    
+    // Public state - Total supply (aggregate, not individual)
+    ledger totalSupply: Uint<64>;
+    
+    // Circuit: Mint shielded token
+    // Creates a new commitment with the specified amount
+    circuit mintShieldedToken(
+        witness amount: Uint<64>,
+        witness secret: Bytes<32>,
+        public commitment: Bytes<32>,
+        public newRoot: Bytes<32>
+    ) {
+        // Verify commitment is correctly computed using sha256
+        // In Compact, hash() is available as a built-in function
+        assert commitment == sha256(amount, secret) : "invalid commitment";
+        
+        // Verify new root is provided
+        assert newRoot != Bytes<32>::from([0u8; 32]) : "invalid root";
+        
+        // Update ledger state
+        commitmentRoot = newRoot;
+        totalSupply += amount;
+    }
+    
+    // Circuit: Evolve nonce for commitment
+    // Used to update commitment without revealing the original
+    circuit evolveNonce(
+        witness oldAmount: Uint<64>,
+        witness oldSecret: Bytes<32>,
+        witness newSecret: Bytes<32>,
+        witness oldNullifier: Bytes<32>,
+        public newCommitment: Bytes<32>,
+        public newRoot: Bytes<32>
+    ) {
+        // Verify old commitment nullifier
+        assert oldNullifier == sha256(oldSecret, Bytes<1>::from([0u8])) : "invalid nullifier";
+        
+        // Verify new commitment
+        assert newCommitment == sha256(oldAmount, newSecret) : "invalid new commitment";
+        
+        // Add old nullifier to set (prevent reuse)
+        nullifierSet.insert(oldNullifier);
+        
+        // Update root
+        commitmentRoot = newRoot;
+    }
+    
+    // Circuit: Send shielded token
+    // Transfers tokens from sender to recipient with privacy
+    circuit sendShielded(
+        witness senderBalance: Uint<64>,
+        witness senderSecret: Bytes<32>,
+        witness recipientAmount: Uint<64>,
+        witness recipientSecret: Bytes<32>,
+        witness changeAmount: Uint<64>,
+        witness changeSecret: Bytes<32>,
+        public senderNullifier: Bytes<32>,
+        public recipientCommitment: Bytes<32>,
+        public changeCommitment: Bytes<32>,
+        public newRoot: Bytes<32>,
+        public transferAmount: Uint<64>
+    ) {
+        // Verify sender has sufficient balance
+        assert senderBalance >= transferAmount : "insufficient balance";
+        
+        // Verify sender commitment nullifier
+        assert senderNullifier == sha256(senderSecret, Bytes<1>::from([0u8])) : "invalid sender nullifier";
+        
+        // Verify nullifier not already used
+        assert !nullifierSet.contains(senderNullifier) : "nullifier already used";
+        
+        // Verify recipient commitment
+        assert recipientCommitment == sha256(recipientAmount, recipientSecret) : "invalid recipient commitment";
+        
+        // Verify change commitment
+        assert changeCommitment == sha256(changeAmount, changeSecret) : "invalid change commitment";
+        
+        // Verify conservation: senderBalance = transferAmount + changeAmount
+        assert senderBalance == transferAmount + changeAmount : "conservation violated";
+        
+        // Add nullifier to set
+        nullifierSet.insert(senderNullifier);
+        
+        // Update root
+        commitmentRoot = newRoot;
+    }
+    
+    // Circuit: Immediate shielded send
+    // Simplified version for direct transfers without change
+    circuit sendImmediateShielded(
+        witness senderBalance: Uint<64>,
+        witness senderSecret: Bytes<32>,
+        witness recipientAmount: Uint<64>,
+        witness recipientSecret: Bytes<32>,
+        public senderNullifier: Bytes<32>,
+        public recipientCommitment: Bytes<32>,
+        public newRoot: Bytes<32>,
+        public transferAmount: Uint<64>
+    ) {
+        // Verify sender has sufficient balance
+        assert senderBalance >= transferAmount : "insufficient balance";
+        
+        // Verify sender commitment nullifier
+        assert senderNullifier == sha256(senderSecret, Bytes<1>::from([0u8])) : "invalid sender nullifier";
+        
+        // Verify nullifier not already used
+        assert !nullifierSet.contains(senderNullifier) : "nullifier already used";
+        
+        // Verify recipient commitment
+        assert recipientCommitment == sha256(recipientAmount, recipientSecret) : "invalid recipient commitment";
+        
+        // Verify conservation
+        assert senderBalance == transferAmount : "exact amount required";
+        
+        // Add nullifier to set
+        nullifierSet.insert(senderNullifier);
+        
+        // Update root
+        commitmentRoot = newRoot;
+    }
+    
+    // Circuit: Burn shielded token
+    // Destroys tokens and reduces total supply
+    circuit shieldedBurnAddress(
+        witness burnAmount: Uint<64>,
+        witness burnSecret: Bytes<32>,
+        public burnNullifier: Bytes<32>,
+        public newRoot: Bytes<32>
+    ) {
+        // Verify burn commitment nullifier
+        assert burnNullifier == sha256(burnSecret, Bytes<1>::from([0u8])) : "invalid burn nullifier";
+        
+        // Verify nullifier not already used
+        assert !nullifierSet.contains(burnNullifier) : "nullifier already used";
+        
+        // Add nullifier to set
+        nullifierSet.insert(burnNullifier);
+        
+        // Reduce total supply
+        totalSupply -= burnAmount;
+        
+        // Update root
+        commitmentRoot = newRoot;
+    }
+}
