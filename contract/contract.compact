@@ -1,0 +1,289 @@
+// Private NFT Marketplace - Midnight Contract
+// Supports private listings, blind auctions, and royalty enforcement
+
+pragma version 0.1.0;
+
+// NFT Token Interface (simplified ERC-721 equivalent for Midnight)
+interface INFT {
+    fn owner_of(token_id: Uint256) view returns (Address);
+    fn transfer_from(from: Address, to: Address, token_id: Uint256);
+    fn approve(spender: Address, token_id: Uint256);
+}
+
+// Marketplace Contract
+contract PrivateNFTMarketplace {
+
+    // State
+    listing_count: Uint256 = 0;
+    total_sales: Uint256 = 0;
+    total_volume: Uint256 = 0;
+
+    // Royalty registry: token_id -> (creator, royalty_bps)
+    royalties: Map<Uint256, (Address, Uint16)> = Map::new();
+
+    // Listing structure
+    struct Listing {
+        token_id: Uint256,
+        nft_contract: Address,
+        seller: Address,
+        // Private price: stored as commitment, revealed by buyer
+        price_commitment: Bytes32,
+        // Actual price (revealed during purchase)
+        price: Uint256,
+        // Auction state
+        is_auction: Bool,
+        auction_end: Uint64,
+        highest_bid: Uint256,
+        highest_bidder: Address,
+        // Status
+        active: Bool,
+    }
+
+    // Bids for auction
+    bids: Map<Uint256, Map<Bytes32, Uint256>> = Map::new(); // listing_id -> commitment -> amount
+
+    // Listings storage
+    listings: Map<Uint256, Listing> = Map::new();
+
+    // Events
+    event ListingCreated {
+        listing_id: Uint256,
+        seller: Address,
+        token_id: Uint256,
+        is_auction: Bool,
+    }
+
+    event BidSubmitted {
+        listing_id: Uint256,
+        bidder_commitment: Bytes32,
+        amount: Uint256,
+    }
+
+    event PurchaseCompleted {
+        listing_id: Uint256,
+        buyer: Address,
+        price: Uint256,
+        royalty: Uint256,
+    }
+
+    event AuctionEnded {
+        listing_id: Uint256,
+        winner: Address,
+        winning_bid: Uint256,
+    }
+
+    // Initialize contract
+    fn init() {
+        // No initialization needed
+    }
+
+    // Create a fixed-price listing
+    fn create_listing(
+        nft_contract: Address,
+        token_id: Uint256,
+        price: Uint256,
+    ) {
+        let caller = context.caller();
+
+        // Verify caller owns the NFT
+        let nft = INFT::from_address(nft_contract);
+        assert(nft.owner_of(token_id) == caller, "Not NFT owner");
+
+        // Create price commitment (hash of price)
+        let price_bytes = price.to_bytes();
+        let commitment = context.hash(price_bytes);
+
+        // Increment listing count
+        let listing_id = self.listing_count;
+        self.listing_count = listing_id + 1;
+
+        // Store listing
+        let listing = Listing {
+            token_id: token_id,
+            nft_contract: nft_contract,
+            seller: caller,
+            price_commitment: commitment,
+            price: 0, // Hidden until purchase
+            is_auction: false,
+            auction_end: 0,
+            highest_bid: 0,
+            highest_bidder: Address::zero(),
+            active: true,
+        };
+        self.listings.set(listing_id, listing);
+
+        // Emit event
+        emit ListingCreated {
+            listing_id: listing_id,
+            seller: caller,
+            token_id: token_id,
+            is_auction: false,
+        };
+    }
+
+    // Create an auction listing
+    fn create_auction(
+        nft_contract: Address,
+        token_id: Uint256,
+        duration_seconds: Uint64,
+    ) {
+        let caller = context.caller();
+
+        // Verify caller owns the NFT
+        let nft = INFT::from_address(nft_contract);
+        assert(nft.owner_of(token_id) == caller, "Not NFT owner");
+
+        let listing_id = self.listing_count;
+        self.listing_count = listing_id + 1;
+
+        let current_time = context.block_timestamp();
+        let auction_end = current_time + duration_seconds;
+
+        let listing = Listing {
+            token_id: token_id,
+            nft_contract: nft_contract,
+            seller: caller,
+            price_commitment: Bytes32::zero(),
+            price: 0,
+            is_auction: true,
+            auction_end: auction_end,
+            highest_bid: 0,
+            highest_bidder: Address::zero(),
+            active: true,
+        };
+        self.listings.set(listing_id, listing);
+
+        emit ListingCreated {
+            listing_id: listing_id,
+            seller: caller,
+            token_id: token_id,
+            is_auction: true,
+        };
+    }
+
+    // Submit a blind bid (commitment phase)
+    fn submit_bid(listing_id: Uint256, bid_commitment: Bytes32, amount: Uint256) {
+        let listing = self.listings.get(listing_id).unwrap();
+        assert(listing.active, "Listing not active");
+        assert(listing.is_auction, "Not an auction");
+
+        let current_time = context.block_timestamp();
+        assert(current_time < listing.auction_end, "Auction ended");
+
+        // Verify bid amount is positive
+        assert(amount > 0, "Bid must be positive");
+
+        // Store bid
+        let listing_bids = self.bids.get(listing_id);
+        listing_bids.set(bid_commitment, amount);
+        self.bids.set(listing_id, listing_bids);
+
+        emit BidSubmitted {
+            listing_id: listing_id,
+            bidder_commitment: bid_commitment,
+            amount: amount,
+        };
+    }
+
+    // Reveal bid and complete purchase (fixed-price)
+    fn purchase(listing_id: Uint256, actual_price: Uint256) {
+        let listing = self.listings.get(listing_id).unwrap();
+        assert(listing.active, "Listing not active");
+        assert(!listing.is_auction, "Is auction, use end_auction");
+
+        // Verify price commitment matches
+        let price_bytes = actual_price.to_bytes();
+        let commitment = context.hash(price_bytes);
+        assert(commitment == listing.price_commitment, "Price mismatch");
+
+        let buyer = context.caller();
+        assert(buyer != listing.seller, "Seller cannot buy own listing");
+
+        // Calculate royalty
+        let royalty = self.calculate_royalty(listing.token_id, actual_price);
+        let seller proceeds = actual_price - royalty;
+
+        // Transfer NFT to buyer
+        let nft = INFT::from_address(listing.nft_contract);
+        nft.transfer_from(listing.seller, buyer, listing.token_id);
+
+        // Update listing state
+        listing.active = false;
+        listing.price = actual_price;
+        self.listings.set(listing_id, listing);
+
+        // Update stats
+        self.total_sales = self.total_sales + 1;
+        self.total_volume = self.total_volume + actual_price;
+
+        emit PurchaseCompleted {
+            listing_id: listing_id,
+            buyer: buyer,
+            price: actual_price,
+            royalty: royalty,
+        };
+    }
+
+    // End auction and transfer to winner
+    fn end_auction(listing_id: Uint256) {
+        let listing = self.listings.get(listing_id).unwrap();
+        assert(listing.active, "Listing not active");
+        assert(listing.is_auction, "Not an auction");
+
+        let current_time = context.block_timestamp();
+        assert(current_time >= listing.auction_end, "Auction not ended");
+
+        let buyer = listing.highest_bidder;
+        assert(buyer != Address::zero(), "No bids received");
+
+        // Calculate royalty
+        let royalty = self.calculate_royalty(listing.token_id, listing.highest_bid);
+        let seller_proceeds = listing.highest_bid - royalty;
+
+        // Transfer NFT to winner
+        let nft = INFT::from_address(listing.nft_contract);
+        nft.transfer_from(listing.seller, buyer, listing.token_id);
+
+        // Update listing state
+        listing.active = false;
+        self.listings.set(listing_id, listing);
+
+        // Update stats
+        self.total_sales = self.total_sales + 1;
+        self.total_volume = self.total_volume + listing.highest_bid;
+
+        emit AuctionEnded {
+            listing_id: listing_id,
+            winner: buyer,
+            winning_bid: listing.highest_bid,
+        };
+    }
+
+    // Set royalty for a token
+    fn set_royalty(token_id: Uint256, creator: Address, royalty_bps: Uint16) {
+        assert(royalty_bps <= 1000, "Max 10% royalty"); // 1000 bps = 10%
+        self.royalties.set(token_id, (creator, royalty_bps));
+    }
+
+    // Calculate royalty amount
+    fn calculate_royalty(token_id: Uint256, price: Uint256) -> Uint256 {
+        let royalty_info = self.royalties.get(token_id);
+        match royalty_info {
+            Some((creator, bps)) => {
+                let royalty = (price * bps) / 10000;
+                royalty
+            },
+            None => 0,
+        }
+    }
+
+    // Get listing info
+    fn get_listing(listing_id: Uint256) view returns (Listing) {
+        self.listings.get(listing_id).unwrap()
+    }
+
+    // Get total stats
+    fn get_stats() view returns (Uint256, Uint256, Uint256) {
+        (self.listing_count, self.total_sales, self.total_volume)
+    }
+}

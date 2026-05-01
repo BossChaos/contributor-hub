@@ -1,0 +1,22 @@
+{
+  "name": "private-nft-marketplace",
+  "version": "1.0.0",
+  "description": "Private NFT Marketplace on Midnight",
+  "main": "backend/server.ts",
+  "scripts": {
+    "test": "jest",
+    "start": "ts-node backend/server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0"
+  }
+}
