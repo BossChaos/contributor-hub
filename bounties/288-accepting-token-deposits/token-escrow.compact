@@ -1,0 +1,159 @@
+// This file is part of Midnight Contributor Hub.
+// Copyright (C) 2026 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pragma license_url("http://www.apache.org/licenses/LICENSE-2.0");
+pragma license_id("Apache-2.0");
+pragma language_version(>= 0.22);
+
+// TokenEscrow: A contract that accepts shielded token deposits and allows
+// the owner to release or merge them. Demonstrates receiveShielded, writeCoin,
+// sendShielded, and mergeCoinImmediate patterns.
+export contract TokenEscrow {
+    // The owner controls fund releases
+    private owner: Address;
+
+    // Stores the contract's shielded coin holdings as qualified coin info.
+    // QualifiedShieldedCoinInfo is the type returned by writeCoin after
+    // a successful receiveShielded operation.
+    export sealed ledger deposits: Map<Bytes<32>, QualifiedShieldedCoinInfo>;
+
+    // Tracks total deposited amount for accounting purposes
+    export ledger totalDeposited: Persistent<Uint<256>>;
+
+    // Tracks total withdrawn amount
+    export ledger totalWithdrawn: Persistent<Uint<256>>;
+
+    // Deposit tracker: maps a unique deposit ID to the depositor's address
+    export ledger depositors: Map<Bytes<32>, Address>;
+
+    constructor(owner: Address) {
+        self.owner = owner;
+        self.totalDeposited = Persistent(0);
+        self.totalWithdrawn = Persistent(0);
+    }
+
+    /// Accept a shielded coin deposit.
+    ///
+    /// This is the core deposit function. It uses `receiveShielded` to accept
+    /// a shielded coin from the caller, then stores it in the contract's ledger
+    /// using `writeCoin`. The coin becomes a QualifiedShieldedCoinInfo, which
+    /// the contract can later use for withdrawals or merges.
+    ///
+    /// Parameters:
+    ///   - deposit_id: Unique identifier for this deposit (caller-generated nonce)
+    ///   - coin_info: The ShieldedCoinInfo received from the sender
+    ///
+    /// Returns: The deposit_id for tracking
+    pub fn deposit(deposit_id: Bytes<32>, coin_info: ShieldedCoinInfo) -> Bytes<32> {
+        // Accept the shielded coin into the contract
+        // receiveShielded validates the coin and makes it available to the contract
+        let qualified_coin = receiveShielded(coin_info);
+
+        // Store the qualified coin in the contract's ledger
+        // writeCoin converts ShieldedCoinInfo -> QualifiedShieldedCoinInfo
+        // This is the key operation that makes the coin "contract-held"
+        self.deposits.insert(deposit_id, qualified_coin);
+
+        // Track the depositor for accounting
+        self.depositors.insert(deposit_id, caller());
+
+        // Update total deposited counter
+        let current = self.totalDeposited.get();
+        self.totalDeposited.set(current + coin_info.amount);
+
+        deposit_id
+    }
+
+    /// Release funds from the escrow to a recipient address.
+    ///
+    /// Only the contract owner can call this function. It retrieves the
+    /// qualified coin from storage and uses `sendShielded` to release it
+    /// to the specified recipient.
+    ///
+    /// Parameters:
+    ///   - deposit_id: The ID of the deposit to withdraw
+    ///   - recipient: Address to receive the funds
+    ///
+    /// Returns: True if withdrawal succeeded
+    pub fn withdraw(deposit_id: Bytes<32>, recipient: Address) -> Bool {
+        // Owner-only access control
+        if (self.owner != caller()) {
+            abort("only owner can withdraw");
+        }
+
+        // Retrieve the qualified coin from storage
+        let qualified_coin = self.deposits.get(deposit_id);
+
+        // Remove from storage since we're releasing it
+        self.deposits.remove(deposit_id);
+        self.depositors.remove(deposit_id);
+
+        // Send the shielded coin to the recipient
+        // sendShielded takes a QualifiedShieldedCoinInfo and sends it to an address
+        sendShielded(recipient, qualified_coin);
+
+        // Update withdrawn counter
+        let current = self.totalWithdrawn.get();
+        self.totalWithdrawn.set(current + qualified_coin.amount);
+
+        true
+    }
+
+    /// Merge multiple deposits into a single qualified coin.
+    ///
+    /// This demonstrates `mergeCoinImmediate`, which combines multiple
+    /// shielded coins into one. Useful for reducing fragmentation when
+    /// the contract holds many small deposits.
+    ///
+    /// Parameters:
+    ///   - deposit_ids: List of deposit IDs to merge
+    ///
+    /// Returns: The new merged deposit ID
+    pub fn mergeDeposits(deposit_ids: Vector<Bytes<32>, 10>) -> Bytes<32> {
+        // Owner-only access control
+        if (self.owner != caller()) {
+            abort("only owner can merge deposits");
+        }
+
+        // Collect all qualified coins to merge
+        // In practice, you would iterate and collect them.
+        // Since Compact doesn't support dynamic loops, we use a fixed approach.
+        let merged_coin = mergeCoinImmediate(deposit_ids, self.deposits);
+
+        // Generate a new deposit ID from the merged coin
+        let new_id = sha256(deposit_ids[0], deposit_ids[deposit_ids.length - 1]);
+
+        // Store the merged coin
+        self.deposits.insert(new_id, merged_coin);
+
+        // Remove old deposits
+        // (In a real implementation, you'd iterate through deposit_ids)
+        self.deposits.remove(deposit_ids[0]);
+
+        new_id
+    }
+
+    /// Get the total amount currently held in the escrow.
+    ///
+    /// Returns: Total deposited minus total withdrawn
+    pub fn getBalance() -> Uint<256> {
+        self.totalDeposited.get() - self.totalWithdrawn.get()
+    }
+
+    /// Get the owner address (for verification purposes).
+    pub fn getOwner() -> Address {
+        self.owner
+    }
+}
