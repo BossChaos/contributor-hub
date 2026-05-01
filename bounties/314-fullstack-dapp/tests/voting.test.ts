@@ -99,7 +99,9 @@ describe('Security Properties', () => {
         // Generate 1000 nullifiers with different secrets
         for (let i = 0; i < 1000; i++) {
             const secret = new Uint8Array(32);
-            secret[0] = i;
+            // Use multiple bytes to ensure uniqueness beyond 256
+            secret[0] = i & 0xff;
+            secret[1] = (i >> 8) & 0xff;
             const nullifier = bytesToHex(generateNullifier(secret, electionId));
             expect(nullifiers.has(nullifier)).toBe(false);
             nullifiers.add(nullifier);
