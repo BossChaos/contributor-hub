@@ -1,0 +1,85 @@
+// Replay Attack Prevention in Compact: Nonces, Nullifiers & Domain Separation
+// Example contract demonstrating three replay prevention mechanisms
+
+// Package and imports
+package example.replay;
+
+import Midnight.Standard.Token.Types from "../standard/token/types.compact";
+import Midnight.Standard.Token.Unshielded from "../standard/token/unshielded.compact";
+import Midnight.Standard.Account from "../standard/account.compact";
+
+// State
+state {
+    // Counter for nonce-based prevention
+    operationCounter: Counter,
+    // Set of used nullifiers
+    usedNullifiers: Set[Bytes],
+    // Domain separation prefix
+    domainTag: Bytes,
+}
+
+// Initialize state
+init {
+    state.operationCounter = 0,
+    state.usedNullifiers = Set.empty[Bytes],
+    state.domainTag = b"REPLAY_DOMAIN_V1",
+}
+
+// Method 1: Counter-based Nonce Prevention
+// Each operation requires an incrementing nonce
+method counterBasedNonce(user: Address, nonce: U256, amount: U256) {
+    // Verify nonce matches expected counter value
+    assert(nonce == state.operationCounter, "Invalid nonce: expected incrementing value");
+    
+    // Process the operation
+    // ... (your business logic here)
+    
+    // Increment counter after successful operation
+    state.operationCounter = state.operationCounter + 1;
+}
+
+// Method 2: Set-based Nullifier Prevention
+// Uses persistentCommit to generate unique nullifiers
+method nullifierBasedPrevention(user: Address, secret: Bytes, context: Bytes, amount: U256) {
+    // Generate nullifier from secret and context
+    nullifier: Bytes = persistentCommit(secret, context);
+    
+    // Check if nullifier has been used before
+    assert(!state.usedNullifiers.contains(nullifier), "Nullifier already used: replay detected");
+    
+    // Process the operation
+    // ... (your business logic here)
+    
+    // Add nullifier to used set
+    state.usedNullifiers = state.usedNullifiers.add(nullifier);
+}
+
+// Method 3: Domain Separation Prevention
+// Uses domain tags to prevent cross-circuit replay
+method domainSeparatedOperation(user: Address, operationType: Bytes, data: Bytes, amount: U256) {
+    // Combine domain tag with operation type and data
+    domainData: Bytes = state.domainTag.concat(operationType).concat(data);
+    
+    // Hash with domain separation
+    operationHash: Bytes = hashBlake2b(domainData);
+    
+    // Verify operation hasn't been executed
+    assert(!state.usedNullifiers.contains(operationHash), "Operation already executed");
+    
+    // Process the operation
+    // ... (your business logic here)
+    
+    // Mark operation as used
+    state.usedNullifiers = state.usedNullifiers.add(operationHash);
+}
+
+// Helper: Generate nullifier from secret and context
+function generateNullifier(secret: Bytes, context: Bytes): Bytes {
+    return persistentCommit(secret, context);
+}
+
+// Helper: Verify domain separation
+function verifyDomain(domainTag: Bytes, operationType: Bytes, data: Bytes): Bytes {
+    let combined: Bytes = domainTag.concat(operationType).concat(data);
+    return hashBlake2b(combined);
+}
