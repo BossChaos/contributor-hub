@@ -27,7 +27,7 @@ interface WalletState {
 }
 
 // Wallet connection hook (using Lace wallet)
-function useWallet(): WalletState {
+function useWallet(): WalletState & { connect: () => Promise<void> } {
     const [wallet, setWallet] = useState<WalletState>({
         address: '',
         isConnected: false,
@@ -48,7 +48,7 @@ function useWallet(): WalletState {
         }
     };
 
-    return { wallet, connect };
+    return { ...wallet, connect };
 }
 
 /**

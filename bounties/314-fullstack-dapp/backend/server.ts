@@ -12,7 +12,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { generateVoteWitness, generateSecretKey } from './voting-witness';
+import { generateVoteWitness, generateSecretKey } from '../typescript/voting-witness';
 
 const app = express();
 app.use(cors());
