@@ -1,0 +1,89 @@
+// Privacy-Preserving Voting dApp
+// A complete example demonstrating confidential voting on Midnight
+
+package example.voting;
+
+import Midnight.Standard.Token.Types from "../standard/token/types.compact";
+import Midnight.Standard.Token.Unshielded from "../standard/token/unshielded.compact";
+import Midnight.Standard.Account from "../standard/account.compact";
+
+// State
+state {
+    // Vote options
+    options: Map[Bytes, U256],
+    // Used nullifiers to prevent double voting
+    usedNullifiers: Set[Bytes],
+    // Domain separation tag
+    domainTag: Bytes,
+    // Voting period
+    votingStart: U256,
+    votingEnd: U256,
+    // Active status
+    isActive: Bool,
+}
+
+// Initialize with options
+init(options: List[Bytes]) {
+    state.options = Map.empty[Bytes, U256],
+    state.usedNullifiers = Set.empty[Bytes],
+    state.domainTag = b"VOTING_DOMAIN_V1",
+    state.votingStart = 0,
+    state.votingEnd = 0,
+    state.isActive = false,
+    
+    // Initialize all options with 0 votes
+    for (option in options) {
+        state.options = state.options.put(option, 0);
+    }
+}
+
+// Start voting period
+method startVoting(startTime: U256, endTime: U256) {
+    assert(!state.isActive, "Voting already active");
+    assert(startTime < endTime, "Invalid time range");
+    
+    state.votingStart = startTime;
+    state.votingEnd = endTime;
+    state.isActive = true;
+}
+
+// End voting period
+method endVoting() {
+    assert(state.isActive, "Voting not active");
+    state.isActive = false;
+}
+
+// Cast vote with privacy protection
+method castVote(voter: Address, nullifier: Bytes, option: Bytes) {
+    // Check voting is active
+    assert(state.isActive, "Voting not active");
+    
+    // Check nullifier hasn't been used
+    assert(!state.usedNullifiers.contains(nullifier), "Already voted");
+    
+    // Check option exists
+    assert(state.options.contains(option), "Invalid option");
+    
+    // Record vote
+    currentCount: U256 = state.options.get(option);
+    state.options = state.options.put(option, currentCount + 1);
+    
+    // Mark nullifier as used
+    state.usedNullifiers = state.usedNullifiers.add(nullifier);
+}
+
+// Get current results (public)
+method getResults(): Map[Bytes, U256] {
+    return state.options;
+}
+
+// Get vote count for specific option
+method getVoteCount(option: Bytes): U256 {
+    assert(state.options.contains(option), "Invalid option");
+    return state.options.get(option);
+}
+
+// Check if address has voted
+method hasVoted(nullifier: Bytes): Bool {
+    return state.usedNullifiers.contains(nullifier);
+}
