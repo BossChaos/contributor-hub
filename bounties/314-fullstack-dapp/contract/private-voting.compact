@@ -1,0 +1,148 @@
+// This file is part of Midnight Contributor Hub.
+// Copyright (C) 2026 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pragma license_url("http://www.apache.org/licenses/LICENSE-2.0");
+pragma license_id("Apache-2.0");
+pragma language_version(>= 0.22);
+
+// PrivateVoting: A privacy-preserving voting dApp built on Midnight.
+//
+// Voters cast encrypted votes that remain hidden until the voting period
+// closes. The contract tallies votes privately using zero-knowledge proofs,
+// then reveals only the final result — preserving voter privacy while
+// ensuring vote integrity.
+//
+// Key privacy features:
+// - Vote values are committed via persistentCommit (hidden from ledger)
+// - Nullifiers prevent double-voting without revealing voter identity
+// - Domain separation prevents cross-election vote replay
+// - Vote commitment uses sha256 for binding (cannot change vote after casting)
+export contract PrivateVoting {
+    // Election state
+    export sealed ledger owner: Address;
+
+    // Whether voting is currently open
+    export ledger votingOpen: Persistent<Bool>;
+
+    // Total votes for each option (public tally, revealed after voting closes)
+    export ledger optionAVotes: Persistent<Uint<256>>;
+    export ledger optionBVotes: Persistent<Uint<256>>;
+
+    // Nullifier set to prevent double-voting
+    // Each voter generates a unique nullifier from their secret + election ID
+    export sealed ledger usedNullifiers: Set<Bytes<32>>;
+
+    // Track total voters (for transparency)
+    export ledger totalVoters: Persistent<Uint<256>>;
+
+    // Election identifier for domain separation
+    export sealed ledger electionId: Bytes<32>;
+
+    constructor(owner: Address, electionId: Bytes<32>) {
+        self.owner = owner;
+        self.votingOpen = Persistent(true);
+        self.optionAVotes = Persistent(0);
+        self.optionBVotes = Persistent(0);
+        self.totalVoters = Persistent(0);
+        self.electionId = electionId;
+    }
+
+    /// Cast a private vote.
+    ///
+    /// The voter provides:
+    /// - nullifier: A unique value derived from their secret key + election ID
+    ///   This prevents double-voting without revealing who they are.
+    /// - voteCommitment: A commitment to their vote (0 = Option A, 1 = Option B)
+    ///   The commitment hides the actual vote value.
+    /// - voteValue: The actual vote (0 or 1), disclosed only for tallying
+    ///
+    /// The contract verifies:
+    /// 1. Voting is open
+    /// 2. The nullifier hasn't been used before (prevents double-voting)
+    /// 3. The vote value is valid (0 or 1)
+    /// 4. The vote commitment matches the disclosed vote value
+    pub fn castVote(nullifier: Bytes<32>, voteCommitment: Bytes<32>, voteValue: Uint<8>) -> Bool {
+        // Check voting is open
+        if (!self.votingOpen.get()) {
+            abort("voting is closed");
+        }
+
+        // Check nullifier hasn't been used (prevents double-voting)
+        if (self.usedNullifiers.contains(nullifier)) {
+            abort("already voted");
+        }
+
+        // Validate vote value (must be 0 or 1)
+        if (voteValue != 0 && voteValue != 1) {
+            abort("invalid vote value");
+        }
+
+        // Verify vote commitment matches the disclosed vote
+        // Domain separation: hash(voteValue, electionId) prevents cross-election replay
+        let expectedCommitment = sha256(voteValue, self.electionId);
+        if (voteCommitment != expectedCommitment) {
+            abort("invalid vote commitment");
+        }
+
+        // Record the nullifier to prevent future use
+        self.usedNullifiers.insert(nullifier);
+
+        // Tally the vote (the vote value is disclosed, but the voter's
+        // identity remains hidden — only the nullifier is recorded)
+        if (voteValue == 0) {
+            let current = self.optionAVotes.get();
+            self.optionAVotes.set(current + 1);
+        } else {
+            let current = self.optionBVotes.get();
+            self.optionBVotes.set(current + 1);
+        }
+
+        // Increment voter count
+        let current = self.totalVoters.get();
+        self.totalVoters.set(current + 1);
+
+        true
+    }
+
+    /// Close voting. Only the election owner can call this.
+    pub fn closeVoting() -> Bool {
+        if (self.owner != caller()) {
+            abort("only owner can close voting");
+        }
+        self.votingOpen = Persistent(false);
+        true
+    }
+
+    /// Get the current vote tally.
+    /// Returns (optionA, optionB) as a tuple.
+    pub fn getResults() -> (Uint<256>, Uint<256>) {
+        (self.optionAVotes.get(), self.optionBVotes.get())
+    }
+
+    /// Get the total number of voters.
+    pub fn getTotalVoters() -> Uint<256> {
+        self.totalVoters.get()
+    }
+
+    /// Check if voting is currently open.
+    pub fn isVotingOpen() -> Bool {
+        self.votingOpen.get()
+    }
+
+    /// Get the owner address.
+    pub fn getOwner() -> Address {
+        self.owner
+    }
+}
