@@ -1,0 +1,40 @@
+pragma language_version >= 0.22;
+
+// nativeToken() — Returns MNT token type identifier (Bytes<32>)
+// tokenType(addr) — Derives token type from a contract address
+// evolveNonce(nonce) — Advances nonce for replay protection
+// shieldedBurnAddress() — Returns canonical burn address
+
+contract HelperCircuitsDemo {
+  export ledger acceptedToken: Bytes<32>;
+  export ledger currentNonce: Bytes<32>;
+  export ledger totalBurned: Uint<64>;
+
+  circuit initialize(): [] {
+    ledger.acceptedToken = nativeToken();
+  }
+
+  circuit isAccepted(coinType: Bytes<32>): [Boolean] {
+    return [coinType == nativeToken()];
+  }
+
+  circuit getCustomTokenType(tokenContract: ContractAddress): [Bytes<32>] {
+    return [tokenType(tokenContract)];
+  }
+
+  circuit protectedAction(
+    witness action: Bytes<32>,
+    witness secret: Bytes<32>
+  ): [Bytes<32>] {
+    const nonce = ledger.currentNonce;
+    assert verifyCommitment(secret, nonce) : "invalid nonce";
+    const nextNonce = evolveNonce(nonce);
+    ledger.currentNonce = nextNonce;
+    return [nextNonce];
+  }
+
+  circuit burn(amount: Uint<64>): [] {
+    sendShielded(shieldedBurnAddress(), amount);
+    ledger.totalBurned = ledger.totalBurned + amount;
+  }
+}

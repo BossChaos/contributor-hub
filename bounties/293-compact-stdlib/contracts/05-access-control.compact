@@ -1,0 +1,22 @@
+pragma language_version >= 0.22;
+
+// ContractAddress: Canonical identity for smart contracts
+// Derived from code hash + deployment parameters
+
+contract AccessControlled {
+  export ledger admin: ContractAddress;
+
+  circuit initialize(adminAddr: ContractAddress): [] {
+    assert ledger.admin == ContractAddress.zero() : "already initialized";
+    ledger.admin = adminAddr;
+  }
+
+  circuit adminAction(): [] {
+    assert ledger.admin == ContractAddress.self() : "unauthorized";
+  }
+
+  circuit transferAdmin(newAdmin: ContractAddress): [] {
+    assert ledger.admin == ContractAddress.self() : "unauthorized";
+    ledger.admin = newAdmin;
+  }
+}

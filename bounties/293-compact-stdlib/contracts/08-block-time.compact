@@ -1,0 +1,54 @@
+pragma language_version >= 0.22;
+
+// getBlockTime() — Current block timestamp (Unix epoch seconds)
+// getBlockNumber() — Current block height
+// getEpoch() — Current consensus epoch number
+
+contract TimeEscrow {
+  export ledger beneficiary: ContractAddress;
+  export ledger amount: Uint<64>;
+  export ledger unlockBlock: Uint<64>;
+  export ledger locked: Boolean;
+
+  circuit lock(
+    beneficiaryAddr: ContractAddress,
+    lockAmount: Uint<64>,
+    durationBlocks: Uint<64>
+  ): [] {
+    assert !ledger.locked : "already locked";
+    ledger.beneficiary = beneficiaryAddr;
+    ledger.amount = lockAmount;
+    ledger.unlockBlock = getBlockNumber() + durationBlocks;
+    ledger.locked = true;
+  }
+
+  circuit release(): [] {
+    assert ledger.locked : "nothing to release";
+    assert getBlockNumber() >= ledger.unlockBlock : "funds still locked";
+    ledger.locked = false;
+  }
+
+  circuit getRemainingBlocks(): [Uint<64>] {
+    const now = getBlockNumber();
+    if now >= ledger.unlockBlock {
+      return [Uint<64>::from(0)];
+    }
+    return [ledger.unlockBlock - now];
+  }
+}
+
+// Epoch-based rate limiting
+contract EpochLimiter {
+  export ledger lastEpoch: Uint<64>;
+  export ledger callsPerEpoch: Uint<64>;
+
+  circuit limitedAction(): [] {
+    const currentEpoch = getEpoch();
+    if currentEpoch != ledger.lastEpoch {
+      ledger.lastEpoch = currentEpoch;
+      ledger.callsPerEpoch = Uint<64>::from(0);
+    }
+    assert ledger.callsPerEpoch < Uint<64>::from(5) : "rate limit exceeded";
+    ledger.callsPerEpoch = ledger.callsPerEpoch + Uint<64>::from(1);
+  }
+}

@@ -1,0 +1,31 @@
+pragma language_version >= 0.22;
+
+// CurvePoint: Point on Midnight's elliptic curve
+// Scalar: Field element for the scalar field (private keys, blinding factors)
+
+contract EllipticCurveDemo {
+  circuit derivePublicKey(
+    witness privateKey: Scalar
+  ): [CurvePoint] {
+    const G = CurvePoint.generator();
+    return [G.multiply(privateKey)];
+  }
+
+  circuit pedersenCommit(
+    witness value: Uint<64>,
+    witness blinding: Scalar
+  ): [CurvePoint] {
+    const H = CurvePoint.hashToCurve(bytes("value"));
+    const G = CurvePoint.generator();
+    const valuePoint = H.multiply(Scalar.fromUint(value));
+    const blindingPoint = G.multiply(blinding);
+    return [valuePoint.add(blindingPoint)];
+  }
+
+  circuit aggregateKeys(
+    pk1: CurvePoint,
+    pk2: CurvePoint
+  ): [CurvePoint] {
+    return [pk1.add(pk2)];
+  }
+}

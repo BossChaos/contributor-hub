@@ -1,0 +1,38 @@
+pragma language_version >= 0.22;
+
+// ============================================================
+// Either<L, R> — Two-Outcome Result Type
+// ============================================================
+// Either represents one of two possible values: Left or Right.
+// By convention, Left = error, Right = success.
+
+contract EitherDemo {
+  // Safe division with structured error
+  circuit safeDivide(
+    witness dividend: Uint<64>,
+    witness divisor: Uint<64>
+  ): [Either<Bytes<32>, Uint<64>>] {
+    if divisor == Uint<64>::from(0) {
+      return [Either.left(bytes("division by zero"))];
+    }
+    return [Either.right(dividend / divisor)];
+  }
+
+  // Process result with branching
+  circuit processResult(
+    witness a: Uint<64>,
+    witness b: Uint<64>
+  ): [Boolean, Uint<64>] {
+    const result = EitherDemo::safeDivide(a, b);
+    if result.isLeft {
+      // Error path — return false with zero quotient
+      return [false, Uint<64>::from(0)];
+    }
+    // Success path — return true with the quotient
+    return [true, result.rightValue];
+  }
+}
+
+// Either is useful when circuits need to communicate
+// structured error messages back to callers.
+// Less common than Maybe, but essential for complex logic.

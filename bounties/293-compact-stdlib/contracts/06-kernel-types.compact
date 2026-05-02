@@ -1,0 +1,31 @@
+pragma language_version >= 0.22;
+
+// ZswapCoinPublicKey — Shielded coin ownership key
+// UserAddress — User-facing address (wraps ZswapCoinPublicKey + derivation path)
+// ShieldedCoinInfo — Coin metadata (value, token type, randomness)
+// QualifiedShieldedCoinInfo — Spendable coin with nullifier key
+// CoinProof — ZK proof of coin ownership
+
+contract KernelTypesDemo {
+  export ledger depositor: ZswapCoinPublicKey;
+  export ledger balance: Uint<64>;
+
+  circuit recordDepositor(pk: ZswapCoinPublicKey): [] {
+    ledger.depositor = pk;
+  }
+
+  circuit getRecipientKey(userAddr: UserAddress): [ZswapCoinPublicKey] {
+    return [userAddr.spendingKey()];
+  }
+
+  circuit inspectCoin(coinInfo: ShieldedCoinInfo): [Uint<64>, Bytes<32>] {
+    return [coinInfo.value, coinInfo.tokenType];
+  }
+
+  circuit deposit(witness coinProof: CoinProof): [QualifiedShieldedCoinInfo] {
+    const coin = receiveShielded(coinProof);
+    assert coin.info.tokenType == nativeToken() : "MNT only";
+    ledger.balance = ledger.balance + coin.info.value;
+    return [coin];
+  }
+}

@@ -1,0 +1,48 @@
+pragma language_version >= 0.22;
+
+// Token Vault: Comprehensive example combining multiple stdlib exports
+// Demonstrates: MerkleTree, persistentCommit, nativeToken, tokenType,
+//               receiveShielded, sendShielded, Maybe, QualifiedShieldedCoinInfo
+
+contract TokenVault {
+  export ledger deposits: MerkleTree<16, Bytes<32>>;
+  export ledger depositCount: Uint<64>;
+  export ledger totalBalance: Uint<64>;
+  export ledger heldCoins: MerkleTree<16, QualifiedShieldedCoinInfo>;
+
+  circuit deposit(witness coinProof: CoinProof): [Uint<64>] {
+    const coin = receiveShielded(coinProof);
+    assert coin.info.tokenType == nativeToken() : "MNT only";
+
+    const index = ledger.depositCount;
+    ledger.heldCoins.set(index, coin);
+    ledger.totalBalance = ledger.totalBalance + coin.info.value;
+    ledger.depositCount = index + Uint<64>::from(1);
+
+    const commitment = persistentCommit(
+      coin.info.value.toBytes().concat(index.toBytes())
+    );
+    ledger.deposits.set(index, commitment);
+
+    return [index];
+  }
+
+  circuit withdraw(
+    coinIndex: Uint<64>,
+    recipient: ZswapCoinPublicKey
+  ): [] {
+    const coin = ledger.heldCoins.get(coinIndex);
+    assert coin.isSome : "coin not found";
+    ledger.totalBalance = ledger.totalBalance - coin.value.info.value;
+    sendShielded(recipient, coin.value, coin.value.info.value);
+    ledger.heldCoins.set(coinIndex, Maybe.none());
+  }
+
+  circuit burn(coinIndex: Uint<64>): [] {
+    const coin = ledger.heldCoins.get(coinIndex);
+    assert coin.isSome : "coin not found";
+    ledger.totalBalance = ledger.totalBalance - coin.value.info.value;
+    sendShielded(shieldedBurnAddress(), coin.value, coin.value.info.value);
+    ledger.heldCoins.set(coinIndex, Maybe.none());
+  }
+}

@@ -1,0 +1,68 @@
+pragma language_version >= 0.22;
+
+// ============================================================
+// Merkle Trees & Commitments
+// ============================================================
+
+// MerkleTree<N, T> — Fixed-depth complete binary Merkle tree
+// N = tree depth (levels), T = leaf type
+// 2^N leaves: N=16 → 65K, N=20 → 1M, N=32 → 4B
+
+contract MerkleRegistry {
+  // 20-level tree of member commitments
+  export ledger members: MerkleTree<20, Bytes<32>>;
+  export ledger memberCount: Uint<64>;
+
+  circuit addMember(commitment: Bytes<32>): [Uint<64>] {
+    const index = ledger.memberCount;
+    ledger.members.set(index, commitment);
+    ledger.memberCount = index + Uint<64>::from(1);
+    return [index];
+  }
+
+  // Verify membership with a Merkle proof
+  circuit verifyMembership(
+    witness leaf: Bytes<32>,
+    witness pathElements: Bytes<32>[20],
+    witness pathIndices: Bool[20]
+  ): [Boolean] {
+    const root = ledger.members.root();
+    const valid = verifyMerkleProof(leaf, root, pathElements, pathIndices);
+    return [valid];
+  }
+}
+
+// persistentCommit(witness) — Creates a state-tree-anchored commitment
+// Same secret → same commitment (deterministic)
+// Anchored to a specific epoch for temporal proofs
+
+contract CommitPhase {
+  export ledger commitments: MerkleTree<16, Bytes<32>>;
+  export ledger commitCount: Uint<64>;
+
+  circuit commit(witness secret: Bytes<32>): [Bytes<32>] {
+    const commitment = persistentCommit(secret);
+    const index = ledger.commitCount;
+    ledger.commitments.set(index, commitment);
+    ledger.commitCount = index + Uint<64>::from(1);
+    return [commitment];
+  }
+}
+
+// verifyCommitment(witness secret, public commitment)
+// Proves that a secret generates a given commitment
+// Used in the reveal phase of commit-reveal protocols
+
+contract RevealPhase {
+  circuit reveal(
+    witness secret: Bytes<32>,
+    public commitment: Bytes<32>
+  ): [Boolean] {
+    return [verifyCommitment(secret, commitment)];
+  }
+}
+
+// Use cases for commit-reveal:
+// - Sealed-bid auctions (commit bid, reveal after deadline)
+// - Private voting (commit vote, reveal after voting closes)
+// - Nullifier patterns (commit to prevent double-spend)

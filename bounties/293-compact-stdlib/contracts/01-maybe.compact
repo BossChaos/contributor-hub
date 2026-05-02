@@ -1,0 +1,48 @@
+pragma language_version >= 0.22;
+
+import * from "stdlib";
+
+// ============================================================
+// Maybe<T> — Optional Value Type
+// ============================================================
+// Maybe<T> represents a value that might or might not exist.
+// It's Either Some(value) or None — no nulls, no sentinel values.
+
+contract MaybeDemo {
+  // Optional admin — starts as None (not set)
+  ledger admin: Maybe<ContractAddress>;
+  // Optional config — initialized lazily
+  ledger config: Maybe<Uint<64>>;
+
+  circuit setAdmin(addr: ContractAddress): [] {
+    assert ledger.admin.isNone : "admin already set";
+    ledger.admin = Maybe.some(addr);
+  }
+
+  circuit clearAdmin(): [] {
+    assert ledger.admin.isSome : "no admin to clear";
+    ledger.admin = Maybe.none();
+  }
+
+  circuit isAdmin(addr: ContractAddress): [Boolean] {
+    const current = ledger.admin;
+    // .isSome is a Boolean — safe to check before accessing .value
+    return [current.isSome && current.value == addr];
+  }
+
+  // Lazy initialization: set config only once
+  circuit initConfig(value: Uint<64>): [] {
+    if ledger.config.isNone {
+      ledger.config = Maybe.some(value);
+    }
+  }
+}
+
+// Key properties of Maybe<T>:
+//   .isSome   → Boolean: true if it holds a value
+//   .isNone   → Boolean: true if it's empty
+//   .value    → T: the inner value (ONLY safe when isSome is true!)
+//
+// ZK gotcha: accessing .value on None causes a constraint failure,
+// not a runtime error. The proof simply cannot be generated.
+// Always guard with .isSome before reading .value.
