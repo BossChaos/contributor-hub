@@ -266,14 +266,17 @@ export circuit shieldedBurnAddress(): Bytes<32> {
 // ============================================
 export circuit mint_and_send(
     recipient: ZswapCoinPublicKey,
-    amount: Uint<128>
+    mintAmount: Uint<128>,
+    sendAmount: Uint<128>
 ): ShieldedSendResult {
     // Access control: only owner can mint_and_send
     const caller = ownPublicKey().bytes;
     assert(caller == owner, "Only owner can mint_and_send");
 
-    // Validate amount
-    assert(disclose(amount) > 0 as Uint<128>, "Amount must be positive");
+    // Validate amounts
+    assert(disclose(mintAmount) > 0 as Uint<128>, "Mint amount must be positive");
+    assert(disclose(sendAmount) > 0 as Uint<128>, "Send amount must be positive");
+    assert(disclose(sendAmount) <= disclose(mintAmount), "Send amount exceeds mint amount");
 
     // Evolve nonce once (more efficient than separate mint + send)
     const oldNonce = disclose(currentNonce);
@@ -281,21 +284,36 @@ export circuit mint_and_send(
     currentNonce = newNonce;
     nonceIndex = nonceIndex + 1 as Uint<128>;
 
-    // Update total supply
-    totalSupply = (totalSupply + disclose(amount)) as Uint<128>;
+    // Update total supply (mint full amount)
+    totalSupply = (totalSupply + disclose(mintAmount)) as Uint<128>;
+
+    // Calculate change (minted but not sent)
+    const changeAmount = disclose(mintAmount) - disclose(sendAmount);
 
     // Create the sent coin (minted directly to recipient)
     const sent = ShieldedCoinInfo {
         nonce: newNonce,
         color: disclose(tokenColor),
-        value: disclose(amount)
+        value: disclose(sendAmount)
     };
 
-    // No change coin since we're minting new tokens
-    return ShieldedSendResult {
-        change: none<ShieldedCoinInfo>(),
-        sent: sent
-    };
+    // Return result with or without change
+    if (changeAmount > 0 as Uint<128>) {
+        const change = ShieldedCoinInfo {
+            nonce: newNonce,
+            color: disclose(tokenColor),
+            value: changeAmount
+        };
+        return ShieldedSendResult {
+            change: some<ShieldedCoinInfo>(change),
+            sent: sent
+        };
+    } else {
+        return ShieldedSendResult {
+            change: none<ShieldedCoinInfo>(),
+            sent: sent
+        };
+    }
 }
 
 // ============================================
@@ -317,4 +335,19 @@ export circuit getCurrentNonce(): Bytes<32> {
 
 export circuit getTokenColor(): Bytes<32> {
     return disclose(tokenColor);
+}
+
+export circuit getNonceCounter(): Uint<128> {
+    return nonceIndex;
+}
+
+export circuit initialize(ownerKey: ZswapCoinPublicKey) {
+    owner = ownerKey.bytes;
+}
+
+export circuit shieldedBurn(
+    coin: QualifiedShieldedCoinInfo,
+    amount: Uint<128>
+): Maybe<ShieldedCoinInfo> {
+    return burnShieldedToken(coin, amount);
 }
