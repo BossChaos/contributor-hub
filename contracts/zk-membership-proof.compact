@@ -1,0 +1,197 @@
+pragma language_version 0.22;
+
+import CompactStandardLibrary;
+
+/**
+ * ============================================================================
+ *                      ZK ANONYMOUS MEMBERSHIP PROOF
+ * ============================================================================
+ * 
+ * Privacy-preserving membership proof system on Midnight.
+ * 
+ * Architecture:
+ * - Sparse Merkle tree (depth-20) manages allowed identities
+ * - Members prove inclusion via Merkle path without revealing identity
+ * - Nullifier-based replay prevention prevents double-usage
+ * - Admin root management via commitment scheme
+ * 
+ * Usage patterns:
+ * - Allowlists (gated access, exclusive features)
+ * - Voter rolls (anonymous voting)
+ * - Membership proofs (DAO eligibility, token gating)
+ * ============================================================================
+ */
+
+// ===========================================================================
+// LEDGER STATE (Public on-chain data)
+// ===========================================================================
+
+/** Current Merkle root representing the set of allowed identities */
+export ledger merkle_root: Bytes<32>;
+
+/** 
+ * Admin commitment: poseidon_hash(admin_secret)
+ * Only the entity holding the secret can call governance circuits
+ */
+export ledger admin_commitment: Bytes<32>;
+
+/** Used nullifiers — prevents replay attacks (same member proving twice) */
+export ledger used_nullifiers: Set<Bytes<32>>;
+
+// ===========================================================================
+// WITNESSES (Private prover-side inputs)
+// ===========================================================================
+
+/** Prover's secret token — hashed to create the Merkle leaf */
+witness getSecret(): Bytes<32>;
+
+/** Context identifier — prevents cross-context nullifier reuse */
+witness getContext(): Bytes<32>;
+
+/** 20 sibling nodes for sparse Merkle path reconstruction */
+witness getSiblings(): Vector<20, Bytes<32>>;
+
+/** 20-bit path: 0 = left child, 1 = right child */
+witness getPathIndices(): Vector<20, Boolean>;
+
+/** Admin secret for governance operations (setRoot) */
+witness getAdminSecret(): Bytes<32>;
+
+// ===========================================================================
+// HELPER CIRCUITS
+// ===========================================================================
+
+/**
+ * Recomputes parent node hash from child and sibling.
+ * 
+ * node = persistentHash(domain_tag || left || right)
+ * 
+ * The domain separator ensures these hashes can't be confused
+ * with hashes from other systems or contexts.
+ */
+circuit hashLevelNode(is_right: Boolean, current: Bytes<32>, sibling: Bytes<32>): Bytes<32> {
+  if (is_right) {
+    return persistentHash<Vector<3, Bytes<32>>>([
+      pad(32, "zk-allowlist:node:v1"),
+      sibling,
+      current
+    ]);
+  } else {
+    return persistentHash<Vector<3, Bytes<32>>>([
+      pad(32, "zk-allowlist:node:v1"),
+      current,
+      sibling
+    ]);
+  }
+}
+
+/**
+ * Verifies membership by walking the Merkle path.
+ * 
+ * Returns: (computed_root, nullifier)
+ * - computed_root: must match on-chain merkle_root
+ * - nullifier: hash(secret || context), used for replay prevention
+ */
+circuit verifyMembership(): (Bytes<32>, Bytes<32>) {
+  let secret = getSecret();
+  let context = getContext();
+  
+  // Compute leaf from secret
+  let leaf = poseidonHash(secret);
+  
+  // Walk up the Merkle tree using siblings and path indices
+  let computed_root = leaf;
+  let siblings = getSiblings();
+  let indices = getPathIndices();
+  
+  for (i in 0..20) {
+    computed_root = hashLevelNode(indices[i], computed_root, siblings[i]);
+  }
+  
+  // Verify against on-chain root
+  assert(computed_root == merkle_root.read(), "Invalid membership proof: root mismatch");
+  
+  // Compute nullifier: hash(secret || context)
+  let nullifier = persistentHash<Vector<2, Bytes<32>>>([secret, context]);
+  
+  // Check nullifier hasn't been used (replay prevention)
+  assert(not used_nullifiers.contains(nullifier), "Nullifier already used — proof replay detected");
+  
+  (computed_root, nullifier)
+}
+
+// ===========================================================================
+// ADMINISTRATOR CIRCUITS (Governance)
+// ===========================================================================
+
+/**
+ * One-time setup: pins the contract administrator.
+ * 
+ * @param initial_commitment Hash of the administrator's secret credential
+ * @throws "Setup failed: Administrator already configured" if called twice
+ */
+export circuit setup(initial_commitment: Bytes<32>): [] {
+  // Prevent overwriting existing admin (default is zero-bytes)
+  assert(admin_commitment.read() == pad(32, ""), "Setup failed: Administrator already configured");
+  admin_commitment.write(disclose(initial_commitment));
+}
+
+/**
+ * Updates the Merkle root on-chain.
+ * 
+ * Authorization: Only the holder of the admin secret can call this.
+ * The admin proves knowledge of the secret whose hash matches admin_commitment.
+ * 
+ * @param new_root The new Merkle root after adding/removing members off-chain
+ */
+export circuit setRoot(new_root: Bytes<32>): [] {
+  let admin_secret = getAdminSecret();
+  let commitment = poseidonHash(admin_secret);
+  
+  assert(commitment == admin_commitment.read(), "Not authorized: admin secret mismatch");
+  
+  merkle_root.write(disclose(new_root));
+}
+
+// ===========================================================================
+// PUBLIC ENTRY POINTS
+// ===========================================================================
+
+/**
+ * Proves membership in the allowlist.
+ * 
+ * The prover provides:
+ * - Their secret (witness, never revealed)
+ * - A Merkle path (siblings + indices, witness)
+ * - A context string (witness, for nullifier binding)
+ * 
+ * The contract verifies:
+ * 1. The Merkle path is valid for the current root
+ * 2. The nullifier hasn't been used before
+ * 
+ * On success:
+ * - The nullifier is recorded in used_nullifiers
+ * - A MembershipVerified event is logged
+ */
+export circuit proveMembership(): [] {
+  let (root, nullifier) = verifyMembership();
+  
+  // Record nullifier to prevent reuse
+  used_nullifiers.insert(disclose(nullifier));
+  
+  // Log the event (root is public, member identity stays hidden)
+  logEvent("MembershipVerified", disclose(root));
+}
+
+/**
+ * Checks if a nullifier has been used.
+ * 
+ * Useful for members to verify their proof status
+ * without submitting a transaction.
+ * 
+ * @param nullifier The nullifier to check
+ * @return true if the nullifier has been used
+ */
+export circuit checkNullifier(nullifier: Bytes<32>): Boolean {
+  used_nullifiers.contains(nullifier)
+}

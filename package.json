@@ -1,0 +1,28 @@
+{
+  "name": "midnight-zk-membership-proof",
+  "version": "1.0.0",
+  "description": "Privacy-preserving anonymous membership proof system using sparse Merkle trees on Midnight",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "midnight",
+    "zero-knowledge",
+    "merkle-tree",
+    "privacy",
+    "blockchain",
+    "zk-proof"
+  ],
+  "author": "BossChaos",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}
