@@ -72,8 +72,6 @@ This maps port 3001 on your host to port 3001 in the container. Set `PROOF_SERVE
 For most development workflows, use a `docker-compose.yml` that includes the proof server alongside the indexer and its database:
 
 ```yaml
-version: "3.9"
-
 services:
   proof-server:
     image: ghcr.io/midnight-ntwrk/proof-server:v1.3.0
@@ -84,7 +82,7 @@ services:
       PROOF_SERVER_LOG_LEVEL: debug
       PROOF_SERVER_MAX_CONCURRENT_PROOFS: 2
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:3001/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -203,10 +201,10 @@ curl -X POST http://ledger-node:9944 \
   -d '{"jsonrpc":"2.0","method":"system_version","params":[],"id":1}'
 ```
 
-Or check container logs:
+Or check the ledger node container logs (the ledger runs as a separate service from the compose stack above):
 
 ```bash
-docker logs midnight-ledger-node 2>&1 | grep -i version
+docker logs <your-ledger-container> 2>&1 | grep -i version
 ```
 
 ### Using Environment Variables for Consistency
@@ -298,7 +296,7 @@ contractState.contract.state.forEach(({ key, value }) => {
 
 ```typescript
 const events = await indexer.request<{
-  events: { edges: Array<{ node: { eventType: string; data: string; blockHeight: number } }> };
+  events: { edges: Array<{ node: { eventType: string; data: string; blockHeight: number; transactionHash: string } }> };
 }>(
   `query ContractEvents($address: String!, $limit: Int!) {
     events(contractAddress: $address, first: $limit, orderBy: BLOCK_HEIGHT_DESC) {
