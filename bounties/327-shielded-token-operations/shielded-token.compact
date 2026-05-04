@@ -78,9 +78,10 @@ contract ShieldedToken {
         // - The contract's color (token type)
         // - The specified value
         // - Sent to the recipient's public key
-        const contractAddr = right(kernel.self());
-        const mintedCoin = mintShieldedTokenImpl(
+        // Mint with the contract's token type (color)
+        const mintedCoin = mintShieldedToken(
             newNonce,
+            tokenType(),
             amount,
             left(recipient)
         );
@@ -111,7 +112,7 @@ contract ShieldedToken {
         // Returns ShieldedSendResult with:
         // - sent: The coin that was sent to recipient
         // - change: Optional leftover coin (if sourceCoin.value > amount)
-        const result = sendShieldedImpl(sourceCoin, left(recipient), amount);
+        const result = sendShielded(sourceCoin, left(recipient), amount);
         
         return result;
     }
@@ -134,7 +135,7 @@ contract ShieldedToken {
         // sendImmediateShielded works with ShieldedCoinInfo directly
         // (not QualifiedShieldedCoinInfo from ledger)
         // Useful for in-transaction transfers without ledger storage
-        const result = sendImmediateShieldedImpl(coinInfo, left(recipient), amount);
+        const result = sendImmediateShielded(coinInfo, left(recipient), amount);
         
         return result;
     }
@@ -157,8 +158,8 @@ contract ShieldedToken {
         // equivalent of destroying tokens.
         const burnAddr = shieldedBurnAddress();
         
-        // Send to burn address
-        const burnResult = sendShieldedImpl(coinToBurn, burnAddr, amount);
+        // Send to burn address (wrapped in Either's right side as ContractAddress)
+        const burnResult = sendShielded(coinToBurn, right(burnAddr), amount);
         
         // Update supply
         totalSupply = totalSupply - amount;
@@ -187,15 +188,16 @@ contract ShieldedToken {
         const currentNonce = padToBytes32(nonceCounter);
         const newNonce = evolveNonce(currentNonce);
         
-        // Step 2: Mint the full amount
-        const mintedCoin = mintShieldedTokenImpl(
+        // Step 2: Mint the full amount with contract's token type
+        const mintedCoin = mintShieldedToken(
             newNonce,
+            tokenType(),
             mintAmount,
             left(recipient)
         );
         
         // Step 3: Send (portion of) the minted coin
-        const sendResult = sendImmediateShieldedImpl(
+        const sendResult = sendImmediateShielded(
             mintedCoin,
             left(recipient),
             sendAmount
