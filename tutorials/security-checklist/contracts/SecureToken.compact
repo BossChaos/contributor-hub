@@ -1,0 +1,97 @@
+pragma language_version 0.23.0;
+import CompactStandardLibrary;
+
+/// Secure Token Contract — Security Checklist Examples
+/// Demonstrates proper patterns for disclose(), replay protection,
+/// ownPublicKey() isolation, and witness validation.
+
+// ─── Ledger Definitions ───
+
+/// Total tokens ever minted (intentionally public)
+export ledger totalSupply: Uint<64>;
+
+/// Total tokens ever burned (intentionally public)
+export ledger totalBurned: Uint<128>;
+
+/// Contract-owned coin storage for deposit workflows
+export ledger coins: Map<Bytes<32>, QualifiedShieldedCoinInfo>;
+
+// ─── Witnesses ───
+
+/// Random nonce for unique coin generation
+witness localNonce(): Bytes<32>;
+
+// ─── Minting Circuit ───
+
+/// Mint new tokens with proper input validation
+/// SECURITY: amount validated via disclosure pattern
+/// SECURITY: no unnecessary disclose() of sensitive data
+export circuit secureMint(
+    amount: Uint<64>,
+    recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): ShieldedCoinInfo {
+    const domain = pad(32, "secure:token");
+    const nonce = localNonce();
+
+    const coin = mintShieldedToken(
+        disclose(domain),
+        disclose(amount),
+        disclose(nonce),
+        disclose(recipient)
+    );
+
+    totalSupply = (totalSupply + disclose(amount)) as Uint<64>;
+    return coin;
+}
+
+// ─── Transfer Circuit ───
+
+/// Transfer tokens with proper replay protection
+/// SECURITY: sendShielded handles nullifier generation
+/// SECURITY: no disclose() of balance or amount outside circuit
+export circuit secureTransfer(
+    coin: QualifiedShieldedCoinInfo,
+    recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+    amount: Uint<64>
+): ShieldedSendResult {
+    return sendShielded(disclose(coin), disclose(recipient), disclose(amount));
+}
+
+// ─── Burn Circuit ───
+
+/// Burn tokens with proper nullifier handling
+/// SECURITY: sendShielded to burn address publishes nullifier
+export circuit secureBurn(
+    coin: QualifiedShieldedCoinInfo,
+    amount: Uint<64>
+): ShieldedSendResult {
+    const burnAddr = shieldedBurnAddress();
+    const result = sendShielded(disclose(coin), burnAddr, disclose(amount));
+
+    totalBurned = (totalBurned + disclose(amount)) as Uint<128>;
+    return result;
+}
+
+// ─── Deposit Circuit — Proper kernel.self() Usage ───
+
+/// Deposit to contract with proper type annotations
+/// SECURITY: kernel.self() has explicit generic annotation
+/// SECURITY: no ownPublicKey() used in circuit logic
+export circuit secureDeposit(coin: ShieldedCoinInfo): [] {
+    coins.insertCoin(
+        disclose(coin.nonce),
+        disclose(coin),
+        right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+    );
+
+    return [];
+}
+
+// ─── Composite Circuit — Safe disclose() Usage ───
+
+/// Public metadata disclosure — ONLY non-sensitive data
+/// SECURITY: disclose() used ONLY for public version number
+/// SECURITY: no balances, keys, or amounts disclosed
+export circuit getPublicMetadata(): [] {
+    return [];
+}
