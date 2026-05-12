@@ -1,0 +1,285 @@
+// Shielded Token Tutorial Contract
+// Demonstrates the complete shielded token lifecycle: mint, transfer, and burn
+// with zero-knowledge proofs on Midnight Network.
+//
+// This contract uses the Midnight stdlib's shielded coin primitives to create
+// privacy-preserving tokens where balances and amounts remain hidden from
+// on-chain observers.
+//
+// Author: BossChaos
+// License: MIT
+
+pragma language_version 0.23.0;
+import CompactStandardLibrary;
+
+// ============================================================
+// PUBLIC LEDGER STATE
+// ============================================================
+// These fields are visible on-chain and track aggregate statistics.
+// Individual balances and transaction amounts remain private.
+
+/// Total number of shielded tokens ever minted.
+export ledger totalSupply: Uint<64>;
+
+/// Total number of shielded tokens ever burned (sent to burn address).
+export ledger totalBurned: Uint<128>;
+
+/// Contract-owned coin storage: nonce -> coin info.
+/// Used for deposit-and-burn workflows without requiring caller-side mt_index.
+export ledger coins: Map<Bytes<32>, QualifiedShieldedCoinInfo>;
+
+// ============================================================
+// WITNESSES (PRIVATE / OFF-CHAIN DATA)
+// ============================================================
+
+/// Random nonce for coin minting. Provided by the caller's wallet or dApp.
+/// Must be unique per mint to prevent coin collision.
+witness localNonce(): Bytes<32>;
+
+// ============================================================
+// MINTING OPERATIONS
+// ============================================================
+
+/// Create a new shielded token coin and send it to a recipient.
+///
+/// The recipient can be either:
+/// - Left:  A ZswapCoinPublicKey (wallet address)
+/// - Right: A ContractAddress (another contract)
+///
+/// IMPORTANT: The recipient address is disclosed to the public ledger.
+/// Only the coin's value and nonce remain private.
+///
+/// @param amount     Number of tokens to mint (max 2^64 - 1)
+/// @param recipient  Target address for the new coin
+/// @return           The created ShieldedCoinInfo (private, returned to caller)
+export circuit createShieldedToken(
+    amount: Uint<64>,
+    recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): ShieldedCoinInfo {
+    // Domain tag identifies this coin type for the stdlib.
+    const domain = pad(32, "shielded:token");
+
+    // Get a unique nonce from the witness (off-chain randomness).
+    const nonce = localNonce();
+
+    // Mint the shielded coin. All parameters are disclosed to the circuit,
+    // but the resulting coin's value is encrypted in the ZK proof.
+    const coin = mintShieldedToken(
+        disclose(domain),
+        disclose(amount),
+        disclose(nonce),
+        disclose(recipient)
+    );
+
+    // Update the public supply counter.
+    totalSupply = (totalSupply + disclose(amount)) as Uint<64>;
+
+    return coin;
+}
+
+/// Derive the next nonce in a sequence from the current nonce.
+///
+/// Useful for deterministic nonce generation when minting multiple coins
+/// in sequence without requiring fresh randomness each time.
+///
+/// @param index        Sequence position (e.g., 0, 1, 2, ...)
+/// @param currentNonce The current nonce value
+/// @return             The evolved nonce for the next mint
+export circuit nextNonce(
+    index: Uint<128>,
+    currentNonce: Bytes<32>
+): Bytes<32> {
+    return evolveNonce(disclose(index), disclose(currentNonce));
+}
+
+// ============================================================
+// ATOMIC MINT AND SEND
+// ============================================================
+
+/// Atomically mint a shielded coin and immediately forward it to a recipient.
+///
+/// This is the recommended pattern for minting + transferring in a single
+/// transaction. It uses sendImmediateShielded which does NOT require the
+/// coin to be qualified with a Merkle tree index (mt_index), since the
+/// coin was just created in this same transaction.
+///
+/// Why not use createShieldedToken + transferShielded separately?
+/// Because freshly minted coins are NOT yet in the on-chain Merkle tree.
+/// sendShielded requires mt_index qualification, which would fail.
+/// sendImmediateShielded bypasses this requirement for same-tx operations.
+///
+/// @param amount     Number of tokens to mint and send
+/// @param recipient  Final destination address
+/// @return           ShieldedSendResult with any change coin
+export circuit mintAndSend(
+    amount: Uint<64>,
+    recipient: Either<ZswapCoinPublicKey, ContractAddress>
+): ShieldedSendResult {
+    const domain = pad(32, "shielded:token");
+    const nonce = localNonce();
+
+    // Step 1: Mint to the contract itself (intermediate holder).
+    const coin = mintShieldedToken(
+        disclose(domain),
+        disclose(amount),
+        disclose(nonce),
+        right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+    );
+
+    // Step 2: Immediately forward to the final recipient.
+    // Explicit cast to Uint<128> because sendImmediateShielded expects it.
+    const result = sendImmediateShielded(
+        disclose(coin),
+        disclose(recipient),
+        disclose(amount) as Uint<128>
+    );
+
+    // Update the public supply counter.
+    totalSupply = (totalSupply + disclose(amount)) as Uint<64>;
+
+    return result;
+}
+
+// ============================================================
+// TRANSFER OPERATIONS
+// ============================================================
+
+/// Transfer tokens from an existing shielded coin to a recipient.
+///
+/// REQUIRES: The coin must be QualifiedShieldedCoinInfo (includes mt_index).
+/// This means the coin must have been committed to the on-chain Merkle tree
+/// in a previous transaction. Freshly minted coins from the same transaction
+/// cannot be used here — use mintAndSend instead.
+///
+/// If amount < coin.value, the leftover change is returned in result.change.
+/// Callers should handle change coins appropriately.
+///
+/// @param coin       Qualified coin to spend (with Merkle tree index)
+/// @param recipient  Destination address
+/// @param amount     Amount to transfer
+/// @return           ShieldedSendResult with any change coin
+export circuit transferShielded(
+    coin: QualifiedShieldedCoinInfo,
+    recipient: Either<ZswapCoinPublicKey, ContractAddress>,
+    amount: Uint<128>
+): ShieldedSendResult {
+    return sendShielded(disclose(coin), disclose(recipient), disclose(amount));
+}
+
+// ============================================================
+// BURN OPERATIONS
+// ============================================================
+
+/// Burn tokens by sending them to the shielded burn address.
+///
+/// REQUIRES: The coin must be QualifiedShieldedCoinInfo (with mt_index).
+/// The burn address is a well-known address that no one controls.
+///
+/// @param coin   Qualified coin to burn (with Merkle tree index)
+/// @param amount Amount to burn (if < coin.value, change goes to burn addr)
+/// @return       ShieldedSendResult
+export circuit burnShieldedToken(
+    coin: QualifiedShieldedCoinInfo,
+    amount: Uint<128>
+): ShieldedSendResult {
+    const burnAddr = shieldedBurnAddress();
+
+    const result = sendShielded(disclose(coin), burnAddr, disclose(amount));
+
+    // Update the public burn counter.
+    totalBurned = (totalBurned + disclose(amount)) as Uint<128>;
+
+    return result;
+}
+
+/// Burn a coin stored in the contract's coin map by nonce.
+///
+/// This variant does NOT require the caller to provide mt_index, because
+/// the coin is looked up from the contract's own storage. The contract
+/// already knows the coin's Merkle position.
+///
+/// WARNING: If amount < coin.value, the change coin is returned to the
+/// burn address (since we're sending to burnAddr). The change cannot be
+/// re-inserted into storage in the same transaction (no mt_index yet).
+///
+/// @param nonce  Nonce of the coin to burn (must exist in coins map)
+/// @param amount Amount to burn
+/// @return       ShieldedSendResult
+export circuit burnByNonce(
+    nonce: Bytes<32>,
+    amount: Uint<128>
+): ShieldedSendResult {
+    assert(coins.member(disclose(nonce)), "Coin not found in contract storage");
+
+    const coin = coins.lookup(disclose(nonce));
+    const burnAddr = shieldedBurnAddress();
+
+    const result = sendShielded(disclose(coin), burnAddr, disclose(amount));
+
+    totalBurned = (totalBurned + disclose(amount)) as Uint<128>;
+
+    // Remove the coin from storage after burning.
+    coins.remove(disclose(nonce));
+
+    return result;
+}
+
+// ============================================================
+// DEPOSIT OPERATIONS
+// ============================================================
+
+/// Deposit a shielded coin into the contract's storage.
+///
+/// The coin must have been received by the contract (via receiveShielded)
+/// and committed to the on-chain Merkle tree in a previous transaction.
+/// The insertCoin call resolves mt_index at runtime by looking up the
+/// coin in the ledger.
+///
+/// @param coin  ShieldedCoinInfo to deposit (must exist on-chain)
+export circuit depositShielded(coin: ShieldedCoinInfo): [] {
+    // Register the coin as received by this contract.
+    receiveShielded(disclose(coin));
+
+    // Insert into the coins map. The coin must have been committed
+    // in a previous transaction for insertCoin to resolve mt_index.
+    coins.insertCoin(
+        disclose(coin.nonce),
+        disclose(coin),
+        right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+    );
+}
+
+// ============================================================
+// COMPOSITE OPERATIONS
+// ============================================================
+
+/// Deposit a coin and immediately burn it in a single transaction.
+///
+/// Uses sendImmediateShielded because the coin was received in this
+/// same transaction, so it doesn't need mt_index qualification.
+///
+/// This is useful for scenarios where a contract receives tokens and
+/// immediately removes them from circulation (e.g., fee burning).
+///
+/// @param coin   ShieldedCoinInfo to deposit and burn
+/// @param amount Amount to burn
+/// @return       ShieldedSendResult
+export circuit depositAndBurn(
+    coin: ShieldedCoinInfo,
+    amount: Uint<128>
+): ShieldedSendResult {
+    // Register the coin as received.
+    receiveShielded(disclose(coin));
+
+    // Immediately burn — no mt_index needed since coin was just received.
+    const burnAddr = shieldedBurnAddress();
+    const result = sendImmediateShielded(
+        disclose(coin),
+        burnAddr,
+        disclose(amount)
+    );
+
+    totalBurned = (totalBurned + disclose(amount)) as Uint<128>;
+
+    return result;
+}
