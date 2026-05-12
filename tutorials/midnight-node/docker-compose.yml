@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  midnight-node:
+    image: ${MIDNIGHT_NODE_IMAGE:-midnightntwrk/midnight-node:0.22.5}
+    container_name: midnight-node
+    restart: unless-stopped
+    platform: linux/amd64
+    ports:
+      - "30333:30333"
+      - "127.0.0.1:9944:9944"
+    volumes:
+      - midnight-node-data:/data
+    environment:
+      - RUST_LOG=info
+    command: |
+      --base-path /data
+      --chain ${MIDNIGHT_NETWORK:-preview}
+      --port 30333
+      --ws-port 9944
+      --name "my-midnight-node"
+
+volumes:
+  midnight-node-data:
